@@ -1,0 +1,4 @@
+[applet.clock]
+description = "Provides current time and date context using the canonical Eugene timezone."
+timezone = "America/Detroit"
+format = "12hr"

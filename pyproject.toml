@@ -1,0 +1,47 @@
+[project]
+name = "eugene"
+version = "0.1.0"
+description = "Single-process personal AI assistant with modular channels and applets."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.34.0",
+  "python-multipart>=0.0.20",
+  "starlette>=0.46.0",
+  "pydantic>=2.10.0",
+  "pydantic-settings>=2.8.0",
+  "litellm>=1.63.0",
+  "chromadb>=0.6.0",
+  "sentence-transformers>=3.4.0",
+  "apscheduler>=3.10.4,<4.0",
+  "discord.py>=2.5.0",
+  "python-telegram-bot>=21.10",
+  "pdfplumber>=0.11.5",
+  "pypdf>=5.4.0",
+  "python-magic>=0.4.27",
+  "Pillow>=11.1.0",
+  "tomli-w>=1.2.0",
+  "watchfiles>=1.0.4",
+  "mcp>=1.6.0",
+  "sqlite-utils>=3.38",
+  "aiosqlite>=0.21.0",
+  "httpx>=0.28.1",
+  "tenacity>=9.0.0",
+  "loguru>=0.7.3",
+]
+
+[project.scripts]
+eugene = "eugene.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.fastapi]
+entrypoint = "eugene.main:app"

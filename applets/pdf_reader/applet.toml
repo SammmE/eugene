@@ -1,0 +1,2 @@
+[applet.pdf_reader]
+description = "Extracts text from PDF attachments before they reach the model."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "pdfplumber"
+  short_description: "Extract text, tables, and PDF objects with pdfplumber"
+  default_prompt: "Use $pdfplumber to extract text and tables from a PDF with robust Python settings."

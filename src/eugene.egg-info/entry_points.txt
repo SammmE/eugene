@@ -1,0 +1,2 @@
+[console_scripts]
+eugene = eugene.__main__:main

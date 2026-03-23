@@ -1,0 +1,3 @@
+[applet.scheduler]
+description = "Creates and manages recurring scheduled tasks."
+primary_channel = "web"
