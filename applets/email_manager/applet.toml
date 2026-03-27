@@ -1,0 +1,10 @@
+[applet.email_manager]
+description = "Manage email via IMAP and SMTP (fetch, read, send, draft, move)."
+imap_host = ""
+imap_port = 993
+imap_use_ssl = true
+smtp_host = ""
+smtp_port = 587
+smtp_use_tls = true
+max_fetch = 20
+default_mailbox = "INBOX"

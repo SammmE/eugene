@@ -5,6 +5,7 @@ src/eugene/__main__.py
 src/eugene/api.py
 src/eugene/config.py
 src/eugene/core.py
+src/eugene/logging_utils.py
 src/eugene/main.py
 src/eugene/models.py
 src/eugene/services.py

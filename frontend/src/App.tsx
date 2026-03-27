@@ -125,6 +125,8 @@ export default function App() {
   const activeSessionRef = useRef(activeSessionId)
   const logRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const autoScrollRef = useRef(true)
+  const streamingMessageBySessionRef = useRef<Record<string, string | null>>({})
 
   const currentMessages = messages[activeSessionId] ?? []
   const connected = status === 'Connected'
@@ -143,9 +145,11 @@ export default function App() {
   }, [activeSessionId])
 
   useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight
+    const log = logRef.current
+    if (!log || !autoScrollRef.current) {
+      return
     }
+    log.scrollTop = log.scrollHeight
   }, [activeSessionId, currentMessages])
 
   useEffect(() => {
@@ -188,6 +192,40 @@ export default function App() {
     }))
   }
 
+  function appendToMessage(sessionId: string, messageId: string, delta: string) {
+    setMessages((current) => {
+      const existing = current[sessionId] ?? []
+      const next = existing.map((item) => (item.id === messageId ? { ...item, text: item.text + delta } : item))
+      return {
+        ...current,
+        [sessionId]: next,
+      }
+    })
+  }
+
+  function upsertAssistantMessage(sessionId: string, messageId: string, text: string) {
+    setMessages((current) => {
+      const existing = current[sessionId] ?? []
+      const hasMessage = existing.some((item) => item.id === messageId)
+      const next = hasMessage
+        ? existing.map((item) => (item.id === messageId ? { ...item, text } : item))
+        : [...existing, { id: messageId, role: 'assistant', text }]
+      return {
+        ...current,
+        [sessionId]: next,
+      }
+    })
+  }
+
+  function onChatScroll() {
+    const log = logRef.current
+    if (!log) {
+      return
+    }
+    const distanceFromBottom = log.scrollHeight - log.scrollTop - log.clientHeight
+    autoScrollRef.current = distanceFromBottom <= 32
+  }
+
   async function loadHistory(sessionId: string) {
     if (!apiKey.trim()) {
       return
@@ -204,6 +242,7 @@ export default function App() {
             text: item.content,
           })),
       }))
+      autoScrollRef.current = true
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load conversation history.')
     }
@@ -250,15 +289,40 @@ export default function App() {
       setError('')
     }
     socket.onmessage = (event) => {
-      const payload = JSON.parse(event.data) as { text?: string }
-      if (!payload.text) {
+      const payload = JSON.parse(event.data) as { type?: string; text?: string; delta?: string }
+      const eventType = payload.type ?? 'message.response'
+      if (eventType === 'message.delta' && payload.delta) {
+        let messageId = streamingMessageBySessionRef.current[sessionId]
+        if (!messageId) {
+          messageId = `${sessionId}-assistant-stream-${crypto.randomUUID()}`
+          streamingMessageBySessionRef.current[sessionId] = messageId
+          addMessage(sessionId, {
+            id: messageId,
+            role: 'assistant',
+            text: '',
+          })
+        }
+        appendToMessage(sessionId, messageId, payload.delta)
+        updateConversation(sessionId, {
+          updatedAt: new Date().toISOString(),
+        })
         return
       }
-      addMessage(sessionId, {
-        id: `${sessionId}-assistant-${crypto.randomUUID()}`,
-        role: 'assistant',
-        text: payload.text,
-      })
+
+      if (eventType !== 'message.response' || !payload.text) {
+        return
+      }
+      const streamedMessageId = streamingMessageBySessionRef.current[sessionId]
+      if (streamedMessageId) {
+        upsertAssistantMessage(sessionId, streamedMessageId, payload.text)
+        streamingMessageBySessionRef.current[sessionId] = null
+      } else {
+        addMessage(sessionId, {
+          id: `${sessionId}-assistant-${crypto.randomUUID()}`,
+          role: 'assistant',
+          text: payload.text,
+        })
+      }
       updateConversation(sessionId, {
         updatedAt: new Date().toISOString(),
       })
@@ -281,11 +345,13 @@ export default function App() {
       socketRef.current.close()
       socketRef.current = null
     }
+    streamingMessageBySessionRef.current[activeSessionRef.current] = null
     setStatus('Disconnected')
   }
 
   function createConversation() {
     const sessionId = crypto.randomUUID()
+    autoScrollRef.current = true
     updateConversation(sessionId, makeConversationRecord(sessionId))
     setActiveSessionId(sessionId)
     setMessages((current) => ({ ...current, [sessionId]: [] }))
@@ -323,6 +389,7 @@ export default function App() {
   }
 
   function selectConversation(sessionId: string) {
+    autoScrollRef.current = true
     setActiveSessionId(sessionId)
     setPrompt('')
     setAttachments([])
@@ -412,6 +479,7 @@ export default function App() {
     setPrompt('')
     setAttachments([])
     setSending(true)
+    streamingMessageBySessionRef.current[activeSessionId] = null
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(payload))
       return
@@ -519,7 +587,7 @@ export default function App() {
           </div>
         </header>
 
-        <div ref={logRef} className="chat-stream" aria-live="polite">
+        <div ref={logRef} className="chat-stream" aria-live="polite" onScroll={onChatScroll}>
           {currentMessages.length === 0 ? (
             <div className="empty-state">
               <h3>Start a conversation</h3>

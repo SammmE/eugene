@@ -336,9 +336,12 @@ textarea:focus-visible {
 
 .chat-pane {
   min-height: calc(100vh - 36px);
+  height: calc(100vh - 36px);
   border-radius: 30px;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
   background:
     linear-gradient(180deg, rgba(255, 250, 244, 0.94), rgba(255, 255, 255, 0.9)),
     var(--panel);
@@ -373,13 +376,18 @@ textarea:focus-visible {
 }
 
 .chat-stream {
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  height: 100%;
   padding: 22px 24px 28px;
   display: grid;
   gap: 18px;
   align-content: start;
+  min-height: 0;
   min-width: 0;
   scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .empty-state {

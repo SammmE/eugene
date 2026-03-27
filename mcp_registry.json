@@ -1,0 +1,20 @@
+[
+  {
+    "name": "github",
+    "package": "@modelcontextprotocol/server-github",
+    "transport": "npm",
+    "description": "GitHub API: repos, issues, PRs, code search, file contents",
+    "lazy": true,
+    "env": {
+      "GITHUB_PERSONAL_ACCESS_TOKEN": ""
+    }
+  },
+  {
+    "name": "filesystem-mcp",
+    "package": "@modelcontextprotocol/server-filesystem",
+    "transport": "npm",
+    "description": "Read and write files on the local filesystem via MCP",
+    "lazy": true,
+    "args": ["."]
+  }
+]

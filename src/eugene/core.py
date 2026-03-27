@@ -4,20 +4,19 @@ import asyncio
 import contextlib
 import importlib.util
 import inspect
-import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter
+from loguru import logger
 from pydantic import BaseModel
 
 from eugene.models import AppletRecord, Attachment, ConversationTurn, Event, Message, ScheduledTask, ToolDefinition
 
 
 EventHandler = Callable[[Event], Awaitable[None]]
-logger = logging.getLogger(__name__)
 
 
 class FieldSpec(BaseModel):
@@ -45,6 +44,7 @@ class AppletBase:
         self.record = record
         self.services = services
         self.config = record.config
+        self.logger = logger.bind(component="applet", applet=self.name)
 
     async def on_load(self) -> None:
         return None
@@ -82,6 +82,7 @@ class ChannelBase:
 
     def __init__(self, services: "ServiceContainer") -> None:
         self.services = services
+        self.logger = logger.bind(component="channel", channel=self.name)
 
     async def on_start(self) -> None:
         raise NotImplementedError
@@ -105,14 +106,17 @@ class EventBus:
 
     def subscribe(self, event_type: str, handler: EventHandler) -> None:
         self._subscribers[event_type].append(handler)
+        logger.bind(component="event_bus", event_type=event_type).debug("Handler subscribed")
 
     async def publish(self, event_type: str, payload: dict[str, Any]) -> None:
+        logger.bind(component="event_bus", event_type=event_type).debug("Event queued")
         await self._queue.put(Event(event_type=event_type, payload=payload))
 
     async def start(self) -> None:
         if self._running:
             return
         self._running = True
+        logger.bind(component="event_bus").info("Event bus started")
         self._worker = asyncio.create_task(self._drain())
 
     async def stop(self) -> None:
@@ -121,17 +125,20 @@ class EventBus:
             self._worker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._worker
+        logger.bind(component="event_bus").info("Event bus stopped")
 
     async def _drain(self) -> None:
         while self._running:
             event = await self._queue.get()
+            logger.bind(component="event_bus", event_type=event.event_type).debug("Event dequeued")
             handlers = list(self._subscribers.get(event.event_type, []))
             if not handlers:
+                logger.bind(component="event_bus", event_type=event.event_type).debug("No handlers for event")
                 continue
             results = await asyncio.gather(*(handler(event) for handler in handlers), return_exceptions=True)
             for result in results:
                 if isinstance(result, Exception):
-                    logger.exception("Event handler failed", exc_info=(type(result), result, result.__traceback__))
+                    logger.bind(component="event_bus", event_type=event.event_type).exception("Event handler failed")
 
 
 class WorkingMemory:
@@ -165,6 +172,8 @@ class WorkingMemory:
 class ServiceContainer:
     config: Any
     event_bus: EventBus
+    compressor: Any = None
+    frontend_reload: Any = None
     applets: Any = None
     channels: Any = None
     provider: Any = None

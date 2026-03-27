@@ -6,6 +6,7 @@ from typing import Annotated, Any
 
 import aiosqlite
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, WebSocket
+from loguru import logger
 from pydantic import BaseModel
 
 from eugene.config import DATA_DIR
@@ -34,6 +35,7 @@ def build_api_router() -> APIRouter:
         supplied = x_api_key or api_key
         app_state = get_app_state(request)
         if supplied != app_state.services.config.api_key:
+            logger.bind(component="api", path=str(request.url.path)).warning("Invalid API key")
             raise HTTPException(status_code=401, detail="Invalid API key")
 
     @router.get("/health")
@@ -157,6 +159,7 @@ def build_api_router() -> APIRouter:
 async def authenticate_websocket(websocket: WebSocket, api_key: str) -> None:
     supplied = websocket.query_params.get("api_key") or websocket.headers.get("x-api-key")
     if supplied != api_key:
+        logger.bind(component="api", path="/ws", client=str(websocket.client)).warning("Invalid websocket API key")
         await websocket.close(code=4401)
         raise HTTPException(status_code=401, detail="Invalid API key")
 
