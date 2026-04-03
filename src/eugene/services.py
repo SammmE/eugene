@@ -444,6 +444,7 @@ class ProviderService:
         logger.bind(component="routing", session_id=message.session_id).error("Routing failed after retries")
         raise RuntimeError(f"Routing failed. Router did not return a valid JSON array.{debug_tail}")
 
+
     async def complete(
         self,
         *,
@@ -454,17 +455,18 @@ class ProviderService:
     ) -> LLMResult:
         active_model = model or self.services.config.default_model
         await self.enforce_context_threshold(active_model, messages)
+        deduped_tools = self._dedupe_tools(tools)
         logger.bind(component="provider", origin=origin).debug(
             "Completing model={model} message_count={message_count} tool_count={tool_count}",
             model=active_model,
             message_count=len(messages),
-            tool_count=len([tool for tool in tools if tool.inject != "never"]),
+            tool_count=len([tool for tool in deduped_tools if tool.inject != "never"]),
         )
         return await self._call_model(
             model=active_model,
             messages=messages,
             origin=origin,
-            tools=[tool.as_llm_tool() for tool in tools if tool.inject != "never"],
+            tools=[tool.as_llm_tool() for tool in deduped_tools if tool.inject != "never"],
         )
 
     async def enforce_context_threshold(self, model: str, messages: list[dict[str, Any]]) -> None:
@@ -501,12 +503,16 @@ class ProviderService:
         if self.services.compressor is not None:
             outbound_messages = self.services.compressor.compress_messages(outbound_messages, origin=origin, model=model)
         resolved_model, request_kwargs = self._prepare_litellm_request(model)
+        message_chars = sum(len(str(item.get("content", ""))) for item in outbound_messages)
+        tool_chars = len(json.dumps(tools or [], ensure_ascii=False))
         logger.bind(component="provider", origin=origin).debug(
-            "Calling LLM model={model} resolved_model={resolved_model} messages={messages} tools={tools}",
+            "Calling LLM model={model} resolved_model={resolved_model} messages={messages} tools={tools} message_chars={message_chars} tool_chars={tool_chars}",
             model=model,
             resolved_model=resolved_model,
             messages=len(outbound_messages),
             tools=len(tools or []),
+            message_chars=message_chars,
+            tool_chars=tool_chars,
         )
         response = await acompletion(
             model=resolved_model,
@@ -555,6 +561,16 @@ class ProviderService:
                 "api_base": api_base,
             }
         return model, {}
+
+    def _dedupe_tools(self, tools: list[ToolDefinition]) -> list[ToolDefinition]:
+        deduped: list[ToolDefinition] = []
+        seen: set[str] = set()
+        for tool in tools:
+            if tool.name in seen:
+                continue
+            seen.add(tool.name)
+            deduped.append(tool)
+        return deduped
 
     def _normalize_tool_call_payload(self, item: Any) -> dict[str, Any]:
         if isinstance(item, dict):
@@ -1434,6 +1450,8 @@ class PromptBundle:
 
 
 class EugeneCore:
+    max_tool_result_chars = 16_000
+
     def __init__(self, services: ServiceContainer) -> None:
         self.services = services
         self.logger = logger.bind(component="core")
@@ -1521,7 +1539,7 @@ class EugeneCore:
                     prompt.messages.append(
                         {
                             "role": "tool",
-                            "content": json.dumps(output),
+                            "content": self._serialize_tool_output(call.name, output),
                             "tool_call_id": call.id or call.name,
                             "name": call.name,
                             "session_id": prompt.session_id,
@@ -1754,6 +1772,39 @@ class EugeneCore:
             if isinstance(item, Attachment)
         )
         return f"{message.text}\n\n{attachment_text}".strip()
+
+    def _serialize_tool_output(self, tool_name: str, output: Any) -> str:
+        try:
+            serialized = json.dumps(output, ensure_ascii=False)
+        except TypeError:
+            serialized = json.dumps(str(output), ensure_ascii=False)
+
+        if len(serialized) <= self.max_tool_result_chars:
+            return serialized
+
+        if isinstance(output, (dict, list)):
+            summary = {
+                "notice": (
+                    f"Tool output truncated for prompt safety. Original serialized length was {len(serialized)} characters. "
+                    "Use a narrower follow-up tool call if more detail is needed."
+                ),
+                "tool_name": tool_name,
+                "original_type": type(output).__name__,
+                "preview": preview(output, max_len=6000),
+            }
+            return json.dumps(summary, ensure_ascii=False)
+
+        return json.dumps(
+            {
+                "notice": (
+                    f"Tool output truncated for prompt safety. Original serialized length was {len(serialized)} characters. "
+                    "Use a narrower follow-up tool call if more detail is needed."
+                ),
+                "tool_name": tool_name,
+                "preview": serialized[:6000],
+            },
+            ensure_ascii=False,
+        )
 
     async def _log_history(self, session_id: str, role: str, content: str) -> None:
         async with aiosqlite.connect(self.services.memory.db_path) as db:
