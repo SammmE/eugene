@@ -113,4 +113,3 @@ Open your browser and navigate to `http://127.0.0.1:8000`. Use the API key confi
 
 ---
 
-© 2026 Eugene Project. Built with ⚡ by the Advanced Agentic AI Team.
