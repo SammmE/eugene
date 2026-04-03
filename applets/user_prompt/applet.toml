@@ -1,0 +1,2 @@
+[applet.user_prompt]
+description = "Prompts the user for answers to one or more questions. Web: interactive modal. Discord/Telegram: plain text message."

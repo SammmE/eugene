@@ -70,6 +70,147 @@ type ChatMessage = {
   toolCalls?: ToolCall[]
 }
 
+// ── User Prompt Modal ─────────────────────────────────────────────────────
+
+type PromptQuestion = {
+  text: string
+  choices: string[]
+}
+
+type ActivePrompt = {
+  requestId: string
+  questions: PromptQuestion[]
+}
+
+function UserPromptModal({ prompt: activePrompt, apiKey, onDone }: {
+  prompt: ActivePrompt
+  apiKey: string
+  onDone: () => void
+}) {
+  const { requestId, questions } = activePrompt
+  const [step, setStep] = useState(0)
+  const [answers, setAnswers] = useState<string[]>(() => questions.map(() => ''))
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  const question = questions[step]
+  const isLast = step === questions.length - 1
+  const currentAnswer = answers[step] ?? ''
+
+  function selectChoice(choice: string) {
+    const next = [...answers]
+    next[step] = choice
+    setAnswers(next)
+  }
+
+  function onCustomChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const next = [...answers]
+    next[step] = e.target.value
+    setAnswers(next)
+  }
+
+  function goBack() {
+    if (step > 0) setStep(step - 1)
+  }
+
+  async function advance() {
+    if (!isLast) {
+      setStep(step + 1)
+      return
+    }
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await fetch('/applets/user_prompt/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+        body: JSON.stringify({ request_id: requestId, answers }),
+      })
+      if (!res.ok) throw new Error(`Server error ${res.status}`)
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to submit answers.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="prompt-overlay" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
+      <div className="prompt-card">
+        <div className="prompt-progress">
+          <span>{step + 1} / {questions.length}</span>
+          <div className="prompt-bar">
+            <div className="prompt-bar-fill" style={{ width: `${((step + 1) / questions.length) * 100}%` }} />
+          </div>
+        </div>
+
+        <h2 id="prompt-title" className="prompt-question">{question.text}</h2>
+
+        {question.choices.length > 0 ? (
+          <div className="prompt-choices">
+            {question.choices.map((choice) => (
+              <button
+                key={choice}
+                type="button"
+                className={`prompt-choice ${currentAnswer === choice ? 'selected' : ''}`}
+                onClick={() => selectChoice(choice)}
+              >
+                {choice}
+              </button>
+            ))}
+            <label className="prompt-custom-label">
+              Or type a custom answer:
+              <input
+                type="text"
+                className="prompt-custom-input"
+                placeholder="Custom answer…"
+                value={currentAnswer === '' || question.choices.includes(currentAnswer) ? '' : currentAnswer}
+                onChange={onCustomChange}
+              />
+            </label>
+          </div>
+        ) : (
+          <input
+            type="text"
+            className="prompt-text-input"
+            placeholder="Your answer…"
+            value={currentAnswer}
+            onChange={(e) => {
+              const next = [...answers]
+              next[step] = e.target.value
+              setAnswers(next)
+            }}
+            autoFocus
+          />
+        )}
+
+        {error ? <p className="prompt-error">{error}</p> : null}
+
+        <div className="prompt-actions">
+          <button
+            type="button"
+            className="ghost"
+            onClick={goBack}
+            disabled={step === 0}
+          >
+            ← Back
+          </button>
+          <button
+            type="button"
+            onClick={advance}
+            disabled={submitting}
+            className="send-button"
+          >
+            {isLast ? (submitting ? 'Submitting…' : 'Submit') : 'Next →'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 type ConversationRecord = {
   id: string
   title: string
@@ -229,6 +370,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const autoScrollRef = useRef(true)
   const streamingMessageBySessionRef = useRef<Record<string, string | null>>({})
+  const [activePrompt, setActivePrompt] = useState<ActivePrompt | null>(null)
 
   const currentMessages = messages[activeSessionId] ?? []
   const connected = status === 'Connected'
@@ -460,6 +602,14 @@ export default function App() {
     socket.onmessage = (event) => {
       const payload = JSON.parse(event.data) as any
       const eventType = payload.type ?? 'message.response'
+
+      if (eventType === 'user_prompt.request') {
+        setActivePrompt({
+          requestId: payload.request_id as string,
+          questions: payload.questions as PromptQuestion[],
+        })
+        return
+      }
 
       if (['message.delta', 'message.tool_call', 'message.tool_call_delta'].includes(eventType)) {
         let messageId = streamingMessageBySessionRef.current[sessionId]
@@ -987,6 +1137,14 @@ export default function App() {
           </div>
         </div>
       </aside>
+
+      {activePrompt ? (
+        <UserPromptModal
+          prompt={activePrompt}
+          apiKey={apiKey}
+          onDone={() => setActivePrompt(null)}
+        />
+      ) : null}
     </main>
   )
 }
