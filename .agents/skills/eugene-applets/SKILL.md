@@ -5,23 +5,51 @@ description: Create, modify, and integrate native Eugene Applets to add capabili
 
 # Eugene Applet Development
 
-Applets are native Python plugins for Eugene that execute directly in the same process space. They are the most powerful way to give Eugene new capabilities natively. 
+Applets are native Python plugins that run inside Eugene's process. They are the most powerful extension point.
 
-## When to use Applets vs. MCP
-- **Use Applets for:** Deep integrations with Eugene's core (modifying agent context, listening to event bus, handling message streams directly, interacting with channels like Discord/Telegram).
-- **Use MCP for:** External system sandboxing, tools built in other languages, or functionality that doesn't need deep integration with the event bus or routing logic.
+## Applets vs. MCP
+
+- **Applet**: Deep Eugene integration — event bus, context injection, routing, scheduling. Write in Python.
+- **MCP**: External process sandboxing, other languages, tools with no need for Eugene internals.
 
 ## Creating an Applet
 
-1. Create a new directory in `applets/<applet_name>/`
-2. Create `applets/<applet_name>/applet.py` 
-3. Implement a subclass of `AppletBase` (from `eugene.core`)
-4. Ensure your configuration fields are properly typed in the class `Config` subclass using `FieldSpec`.
+1. Create `applets/<applet_name>/applet.py` and `applets/<applet_name>/applet.toml`
+2. Subclass `AppletBase` from `eugene.core`
+3. Declare all config fields in the inner `Config` class using `FieldSpec`
+4. Restart the Eugene server — applets are discovered at startup
 
-### Resources
-- **[Applet Reference](file:///c:/Users/sam/Code/eugene/.agents/skills/eugene-applets/references/applet-reference.md)**: Full API documentation for `AppletBase` and its lifecycle.
-- **[Applet Template](file:///c:/Users/sam/Code/eugene/.agents/skills/eugene-applets/assets/applet-template/applet.py)**: A boilerplate file to start from.
+**Full API reference**: [applet-reference.md](references/applet-reference.md)  
+**Boilerplate to start from**: [applet.py template](assets/applet-template/applet.py)
+
+## Configuration & Environment Variables
+
+All applet config uses `Config.fields` with `FieldSpec`. Values are sourced in this priority order (highest wins):
+
+1. **Environment variables** — `{APPLET_NAME}_{FIELD_NAME}` (uppercase, e.g. `EMAIL_MANAGER_IMAP_PASSWORD`)
+2. User overrides — `eugene_data/applet_configs/{name}.json`
+3. `applet.toml` values
+4. `FieldSpec` defaults
+
+> **Rule:** `.env` is for **secrets only** (passwords, API keys, tokens). Everything else — hosts, ports, limits, flags — belongs in `applet.toml`.
+
+**`.env.example`** documents the env var for every built-in applet — use it as reference.
+
+### applet.toml format
+
+Every applet folder needs an `applet.toml`:
+
+```toml
+[applet.my_applet]
+description = "What this applet does"
+my_field = "default_value"
+```
+
+The TOML key must match the directory name exactly.
 
 ## Development Workflow
-1. Use the template as a boilerplate! 
-2. Restart the Eugene server to load the new applet (use the `run_command` tool to stop and restart the uvicorn process). Note: Eugene dynamically loads `applet.py` files on startup.
+
+1. Use the [template](assets/applet-template/applet.py) as a starting point
+2. Declare secrets in `.env` using the `APPLET_NAME_FIELD` convention
+3. Restart Eugene to load (`uvicorn eugene.main:app --reload` or kill/restart)
+4. Test via the web UI or by asking Eugene to use the tool
