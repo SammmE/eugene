@@ -293,49 +293,7 @@ class FrontendReloadService:
         logger.bind(component="frontend_reload").info("Reload notifications sent client_count={count}", count=len(self._clients))
 
 
-class PersonalityService:
-    def __init__(self, services: ServiceContainer) -> None:
-        self.services = services
-        self.path = ROOT_DIR / "personality.toml"
-        self.compiled = ""
-        self._watch_task: asyncio.Task[None] | None = None
 
-    async def start(self) -> None:
-        logger.bind(component="personality").info("Starting personality service path={path}", path=str(self.path))
-        await self.reload()
-        if awatch:
-            self._watch_task = asyncio.create_task(self._watch())
-
-    async def stop(self) -> None:
-        if self._watch_task:
-            self._watch_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._watch_task
-
-    async def reload(self) -> None:
-        data = load_toml(self.path)
-        blocks = []
-        for section, values in data.items():
-            formatted = "\n".join(f"- {key}: {value}" for key, value in values.items())
-            blocks.append(f"[{section}]\n{formatted}")
-        self.compiled = "\n\n".join(blocks)
-        logger.bind(component="personality").debug("Personality reloaded sections={count}", count=len(data))
-        await self.services.event_bus.publish("personality.updated", {"path": str(self.path)})
-
-    async def edit_section(self, section: str, content: dict[str, Any]) -> None:
-        if tomli_w is None:
-            raise RuntimeError("tomli-w is required to edit personality.toml")
-        data = load_toml(self.path)
-        data[section] = content
-        self.path.write_text(tomli_w.dumps(data), encoding="utf-8")
-        await self.reload()
-
-    def read(self) -> str:
-        return self.compiled
-
-    async def _watch(self) -> None:
-        async for _ in awatch(self.path):
-            await self.reload()
 
 
 class ProviderService:
@@ -1266,6 +1224,8 @@ class AppletManager:
         for name, record in self.registry.items():
             if not record.enabled:
                 continue
+            if name in self.instances:
+                continue  # already loaded (e.g. eager applet with routes)
             cls = discover_subclass(Path(record.module_path), AppletBase)
             if cls is not None and cls.get_routes is not AppletBase.get_routes:
                 await self.load_applet(name)
@@ -1288,6 +1248,36 @@ class AppletManager:
             merged.update(json.loads(user_path.read_text(encoding="utf-8")))
         if name == "filesystem":
             merged.setdefault("root_path", self.services.config.filesystem_root)
+        # Overlay environment variables: ENV_APPLET_NAME_FIELD_KEY -> field_key
+        prefix = name.upper() + "_"
+        for env_key, env_val in os.environ.items():
+            if not env_key.upper().startswith(prefix):
+                continue
+            field_name = env_key[len(prefix):].lower()
+            if field_name not in merged and field_name not in schema:
+                continue  # skip unknown keys not declared in Config.fields
+            # Type-coerce to match the schema default type
+            spec = schema.get(field_name)
+            default = spec.default if spec else merged.get(field_name)
+            if isinstance(default, bool):
+                merged[field_name] = env_val.lower() in ("1", "true", "yes")
+            elif isinstance(default, int):
+                try:
+                    merged[field_name] = int(env_val)
+                except ValueError:
+                    merged[field_name] = env_val
+            elif isinstance(default, float):
+                try:
+                    merged[field_name] = float(env_val)
+                except ValueError:
+                    merged[field_name] = env_val
+            else:
+                merged[field_name] = env_val
+            logger.bind(component="applets", applet=name).debug(
+                "Config field overridden from env var env_key={env_key} field={field}",
+                env_key=env_key,
+                field=field_name,
+            )
         return merged
 
     def _config_schema(self, cls: type[AppletBase]) -> dict[str, Any]:
@@ -1687,8 +1677,7 @@ class EugeneCore:
         )
 
     async def _build_prompt(self, message: Message, selected_names: list[str]) -> PromptBundle:
-        system_parts = [self.services.personality.read()]
-        system_parts.extend(await self.services.applets.context_blocks())
+        system_parts = list(await self.services.applets.context_blocks())
         system_parts.append(self.services.applets.awareness_block())
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": "\n\n".join(part for part in system_parts if part), "session_id": message.session_id}

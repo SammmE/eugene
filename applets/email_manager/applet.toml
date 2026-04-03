@@ -1,10 +1,12 @@
 [applet.email_manager]
 description = "Manage email via IMAP and SMTP (fetch, read, send, draft, move)."
-imap_host = ""
+imap_host = "imap.gmail.com"
 imap_port = 993
 imap_use_ssl = true
-smtp_host = ""
+smtp_host = "smtp.gmail.com"
 smtp_port = 587
 smtp_use_tls = true
 max_fetch = 20
 default_mailbox = "INBOX"
+# imap_user and imap_password are secrets — set via EMAIL_MANAGER_IMAP_USER / EMAIL_MANAGER_IMAP_PASSWORD in .env
+# smtp_user and smtp_password are secrets — set via EMAIL_MANAGER_SMTP_USER / EMAIL_MANAGER_SMTP_PASSWORD in .env

@@ -1,0 +1,4 @@
+[applet.system_monitor]
+description = "Monitors system resources (CPU, memory, disk) and warns on low disk space."
+disk_warning_threshold = 10.0
+warning_channel = "telegram"

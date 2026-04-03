@@ -5,6 +5,7 @@ from eugene.core import AppletBase, FieldSpec
 from eugene.models import ToolDefinition
 import caldav
 
+
 class CalendarApplet(AppletBase):
     name = "calendar"
     description = "Syncs with CalDAV to list and add events."
@@ -38,8 +39,12 @@ class CalendarApplet(AppletBase):
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "days": {"type": "integer", "description": "Number of days ahead to check", "default": 7}
-                    }
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days ahead to check",
+                            "default": 7,
+                        }
+                    },
                 },
                 applet_name=self.name,
             ),
@@ -50,12 +55,15 @@ class CalendarApplet(AppletBase):
                     "type": "object",
                     "properties": {
                         "title": {"type": "string"},
-                        "start_time": {"type": "string", "description": "ISO 8601 formatted start time (e.g. 2026-04-03T15:00:00)"},
+                        "start_time": {
+                            "type": "string",
+                            "description": "ISO 8601 formatted start time (e.g. 2026-04-03T15:00:00)",
+                        },
                     },
-                    "required": ["title", "start_time"]
+                    "required": ["title", "start_time"],
                 },
                 applet_name=self.name,
-            )
+            ),
         ]
 
     async def handle_tool(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -67,19 +75,25 @@ class CalendarApplet(AppletBase):
                 calendars = principal.calendars()
                 if not calendars:
                     return "No calendars found."
-                calendar = calendars[0] # Use first calendar
-                
+                calendar = calendars[0]  # Use first calendar
+
                 start_date = datetime.datetime.now()
                 end_date = start_date + datetime.timedelta(days=days)
-                events = calendar.date_search(start=start_date, end=end_date, expand=True)
-                
+                events = calendar.date_search(
+                    start=start_date, end=end_date, expand=True
+                )
+
                 result = []
                 for event in events:
-                    if hasattr(event.vobject_instance, 'vevent'):
+                    if hasattr(event.vobject_instance, "vevent"):
                         summary = event.vobject_instance.vevent.summary.value
                         dtstart = event.vobject_instance.vevent.dtstart.value
                         result.append(f"{summary} at {dtstart}")
-                return f"Upcoming events: {result}" if result else "No upcoming events found."
+                return (
+                    f"Upcoming events: {result}"
+                    if result
+                    else "No upcoming events found."
+                )
             except ValueError as ve:
                 return str(ve)
             except Exception as e:
@@ -100,11 +114,13 @@ class CalendarApplet(AppletBase):
                 if not calendars:
                     return "No calendars found."
                 calendar = calendars[0]
-                
+
                 # Basic vCalendar event creation
-                now_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-                start_str = start_time.strftime('%Y%m%dT%H%M%SZ')
-                
+                now_str = datetime.datetime.now(datetime.timezone.utc).strftime(
+                    "%Y%m%dT%H%M%SZ"
+                )
+                start_str = start_time.strftime("%Y%m%dT%H%M%SZ")
+
                 vcal = f"""BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Eugene//Calendar Applet//EN
@@ -121,5 +137,5 @@ END:VCALENDAR"""
                 return str(ve)
             except Exception as e:
                 return f"Error adding event: {e}"
-                
+
         raise ValueError(f"Unknown tool: {name}")

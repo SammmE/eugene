@@ -1,0 +1,4 @@
+[applet.weather]
+description = "Provides current weather forecast via Open-Meteo. Injects selectively into context."
+default_latitude = "40.7128"
+default_longitude = "-74.0060"

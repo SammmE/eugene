@@ -4,7 +4,6 @@ import asyncio
 import email
 import email.policy
 import imaplib
-import os
 import smtplib
 from email.message import EmailMessage
 from email.utils import formatdate
@@ -22,40 +21,43 @@ class EmailManagerApplet(AppletBase):
 
     class Config:
         fields = {
-            "imap_host": FieldSpec(default="", description="IMAP server hostname (overridden by IMAP_HOST env var)."),
+            "imap_host": FieldSpec(default="", description="IMAP server hostname."),
             "imap_port": FieldSpec(default=993, description="IMAP server port."),
             "imap_use_ssl": FieldSpec(default=True, description="Use SSL for IMAP."),
-            "smtp_host": FieldSpec(default="", description="SMTP server hostname (overridden by SMTP_HOST env var)."),
+            "imap_user": FieldSpec(default="", description="IMAP username / email address."),
+            "imap_password": FieldSpec(default="", description="IMAP password. Set via EMAIL_MANAGER_IMAP_PASSWORD in .env."),
+            "smtp_host": FieldSpec(default="", description="SMTP server hostname."),
             "smtp_port": FieldSpec(default=587, description="SMTP server port."),
             "smtp_use_tls": FieldSpec(default=True, description="Use STARTTLS for SMTP."),
+            "smtp_user": FieldSpec(default="", description="SMTP username (defaults to imap_user if empty)."),
+            "smtp_password": FieldSpec(default="", description="SMTP password. Set via EMAIL_MANAGER_SMTP_PASSWORD in .env."),
             "max_fetch": FieldSpec(default=20, description="Maximum emails returned by fetch_emails."),
             "default_mailbox": FieldSpec(default="INBOX", description="Default IMAP mailbox/folder."),
         }
 
     # ── helpers ──────────────────────────────────────────────────────────
 
-    def _imap_host(self) -> str:
-        return os.getenv("IMAP_HOST", "") or str(self.config.get("imap_host", ""))
+    def _cfg(self, key: str, fallback: Any = "") -> Any:
+        return self.config.get(key, fallback)
 
     def _imap_user(self) -> str:
-        return os.getenv("IMAP_USER", "")
+        return str(self._cfg("imap_user"))
 
     def _imap_password(self) -> str:
-        return os.getenv("IMAP_PASSWORD", "")
-
-    def _smtp_host(self) -> str:
-        return os.getenv("SMTP_HOST", "") or str(self.config.get("smtp_host", ""))
+        return str(self._cfg("imap_password"))
 
     def _smtp_user(self) -> str:
-        return os.getenv("SMTP_USER", "") or self._imap_user()
+        v = str(self._cfg("smtp_user"))
+        return v if v else self._imap_user()
 
     def _smtp_password(self) -> str:
-        return os.getenv("SMTP_PASSWORD", "") or self._imap_password()
+        v = str(self._cfg("smtp_password"))
+        return v if v else self._imap_password()
 
     def _connect_imap(self) -> imaplib.IMAP4 | imaplib.IMAP4_SSL:
-        host = self._imap_host()
-        port = int(self.config.get("imap_port", 993))
-        if self.config.get("imap_use_ssl", True):
+        host = str(self._cfg("imap_host"))
+        port = int(self._cfg("imap_port", 993))
+        if self._cfg("imap_use_ssl", True):
             conn = imaplib.IMAP4_SSL(host, port)
         else:
             conn = imaplib.IMAP4(host, port)
@@ -63,9 +65,9 @@ class EmailManagerApplet(AppletBase):
         return conn
 
     def _connect_smtp(self) -> smtplib.SMTP | smtplib.SMTP_SSL:
-        host = self._smtp_host()
-        port = int(self.config.get("smtp_port", 587))
-        use_tls = self.config.get("smtp_use_tls", True)
+        host = str(self._cfg("smtp_host"))
+        port = int(self._cfg("smtp_port", 587))
+        use_tls = self._cfg("smtp_use_tls", True)
         if port == 465:
             server = smtplib.SMTP_SSL(host, port)
         else:
@@ -208,8 +210,8 @@ class EmailManagerApplet(AppletBase):
     # ── implementations ──────────────────────────────────────────────────
 
     async def _fetch_emails(self, args: dict[str, Any]) -> list[dict[str, str]]:
-        mailbox = args.get("mailbox") or self.config.get("default_mailbox", "INBOX")
-        limit = int(args.get("limit") or self.config.get("max_fetch", 20))
+        mailbox = args.get("mailbox") or self._cfg("default_mailbox", "INBOX")
+        limit = int(args.get("limit") or self._cfg("max_fetch", 20))
         unseen_only: bool = args.get("unseen_only", False)
 
         def _work() -> list[dict[str, str]]:
@@ -225,7 +227,6 @@ class EmailManagerApplet(AppletBase):
                     _status, msg_data = conn.fetch(uid, "(RFC822.HEADER BODY.PEEK[TEXT]<0.500>)")
                     if not msg_data or msg_data[0] is None:
                         continue
-                    # msg_data may contain multiple parts
                     header_raw = b""
                     snippet_raw = b""
                     for part in msg_data:
@@ -236,7 +237,6 @@ class EmailManagerApplet(AppletBase):
                             elif "TEXT" in desc or "BODY" in desc:
                                 snippet_raw = part[1] if isinstance(part[1], bytes) else b""
                     if not header_raw:
-                        # fallback: first tuple payload is headers
                         for part in msg_data:
                             if isinstance(part, tuple):
                                 header_raw = part[1] if isinstance(part[1], bytes) else b""
@@ -259,7 +259,7 @@ class EmailManagerApplet(AppletBase):
 
     async def _read_email(self, args: dict[str, Any]) -> str:
         uid = str(args["uid"])
-        mailbox = args.get("mailbox") or self.config.get("default_mailbox", "INBOX")
+        mailbox = args.get("mailbox") or self._cfg("default_mailbox", "INBOX")
 
         def _work() -> str:
             conn = self._connect_imap()
@@ -325,7 +325,6 @@ class EmailManagerApplet(AppletBase):
 
             conn = self._connect_imap()
             try:
-                # Try common draft folder names
                 draft_folder = None
                 for candidate in ("[Gmail]/Drafts", "Drafts", "INBOX.Drafts", "Draft"):
                     status, _ = conn.select(candidate)
@@ -334,7 +333,6 @@ class EmailManagerApplet(AppletBase):
                         break
                 if not draft_folder:
                     return "Could not find a Drafts folder on this IMAP server."
-
                 conn.append(draft_folder, "\\Draft", None, msg.as_bytes())
                 return f"Draft saved to {draft_folder}."
             finally:
@@ -344,7 +342,7 @@ class EmailManagerApplet(AppletBase):
 
     async def _move_email(self, args: dict[str, Any]) -> str:
         uid = str(args["uid"])
-        source = args.get("source") or self.config.get("default_mailbox", "INBOX")
+        source = args.get("source") or self._cfg("default_mailbox", "INBOX")
         destination = str(args["destination"])
 
         def _work() -> str:

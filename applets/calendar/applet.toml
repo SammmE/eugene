@@ -1,0 +1,4 @@
+[applet.calendar]
+description = "Syncs with a CalDAV server to list and add calendar events."
+caldav_url = ""
+# caldav_user and caldav_password are secrets — set via CALENDAR_CALDAV_USER / CALENDAR_CALDAV_PASSWORD in .env
