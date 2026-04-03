@@ -198,6 +198,7 @@ class FrontendReloadService:
         self.enabled = bool(services.config.frontend_auto_reload)
         self.frontend_dir = ROOT_DIR / "frontend"
         self._watch_task: asyncio.Task[None] | None = None
+        self._initial_build_task: asyncio.Task[None] | None = None
         self._build_lock = asyncio.Lock()
         self._clients: set[Any] = set()
 
@@ -212,6 +213,11 @@ class FrontendReloadService:
             logger.bind(component="frontend_reload").warning("frontend directory/package.json not found; auto-reload disabled")
             return
         self._watch_task = asyncio.create_task(self._watch())
+        static_index = self.frontend_dir.parent / "static" / "index.html"
+        if not static_index.exists():
+            logger.bind(component="frontend_reload").info("Static files missing; dispatching initial build")
+            self._initial_build_task = asyncio.create_task(self._rebuild_and_notify())
+            
         logger.bind(component="frontend_reload").info("Frontend auto-reload watcher started")
 
     async def stop(self) -> None:
@@ -514,33 +520,98 @@ class ProviderService:
             message_chars=message_chars,
             tool_chars=tool_chars,
         )
-        response = await acompletion(
+        session_id = self._extract_session_id(messages)
+        request_kwargs["stream"] = True
+        response_stream = await acompletion(
             model=resolved_model,
             messages=outbound_messages,
             tools=tools or None,
             tool_choice="auto" if tools else None,
             **request_kwargs,
         )
-        choice = response["choices"][0]["message"]
-        usage = response.get("usage", {})
-        raw_tool_calls = choice.get("tool_calls") or []
-        normalized_tool_calls = [self._normalize_tool_call_payload(item) for item in raw_tool_calls]
-        result = LLMResult(
-            text=choice.get("content") or "",
-            tool_calls=[
+        full_content = ""
+        tool_calls_dict: dict[int, dict[str, Any]] = {}
+        finish_reason = None
+        last_chunk = None
+        
+        async for chunk in response_stream:
+            last_chunk = chunk
+            delta = chunk.choices[0].delta
+            
+            if getattr(delta, "content", None):
+                full_content += delta.content
+                if session_id:
+                    await self.services.event_bus.publish("message.delta", {
+                        "session_id": session_id,
+                        "delta": delta.content,
+                        "channel": "web"
+                    })
+            
+            if getattr(delta, "tool_calls", None):
+                for tc in delta.tool_calls:
+                    idx = getattr(tc, "index", 0)
+                    if idx not in tool_calls_dict:
+                        tc_id = getattr(tc, "id", None) or f"call_{idx}"
+                        func = getattr(tc, "function", None)
+                        name = getattr(func, "name", "") if func else ""
+                        tool_calls_dict[idx] = {
+                            "id": tc_id, 
+                            "type": "function",
+                            "function": {"name": name, "arguments": ""}
+                        }
+                        if session_id and name:
+                            await self.services.event_bus.publish("message.tool_call", {
+                                "session_id": session_id,
+                                "tool_call_id": tc_id,
+                                "name": name,
+                                "channel": "web"
+                            })
+                    
+                    func = getattr(tc, "function", None)
+                    args_delta = getattr(func, "arguments", "") if func else ""
+                    if args_delta:
+                        tool_calls_dict[idx]["function"]["arguments"] += args_delta
+                        if session_id:
+                            await self.services.event_bus.publish("message.tool_call_delta", {
+                                "session_id": session_id,
+                                "tool_call_id": tool_calls_dict[idx]["id"],
+                                "arguments_delta": args_delta,
+                                "channel": "web"
+                            })
+                            
+            if getattr(chunk.choices[0], "finish_reason", None):
+                finish_reason = chunk.choices[0].finish_reason
+
+        usage = getattr(last_chunk, "usage", {}) or {} if last_chunk else {}
+        prompt_tokens = usage.get("prompt_tokens", 0) if isinstance(usage, dict) else getattr(usage, "prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0) if isinstance(usage, dict) else getattr(usage, "completion_tokens", 0)
+
+        normalized_tool_calls = list(tool_calls_dict.values())
+        
+        tool_calls = []
+        for item in normalized_tool_calls:
+            args_str = item["function"]["arguments"] or "{}"
+            try:
+                args = json.loads(args_str)
+            except json.JSONDecodeError:
+                args = {} 
+            tool_calls.append(
                 ToolCall(
                     id=item.get("id"),
                     name=item["function"]["name"],
-                    arguments=json.loads(item["function"]["arguments"] or "{}"),
+                    arguments=args,
                 )
-                for item in normalized_tool_calls
-            ],
+            )
+
+        result = LLMResult(
+            text=full_content,
+            tool_calls=tool_calls,
             tool_calls_payload=normalized_tool_calls,
             model=model,
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             estimated_cost=0.0,
-            finish_reason=response["choices"][0].get("finish_reason"),
+            finish_reason=finish_reason,
         )
         logger.bind(component="provider", origin=origin).debug(
             "LLM response finish_reason={finish_reason} tool_calls={tool_calls} prompt_tokens={prompt_tokens} completion_tokens={completion_tokens}",
@@ -1457,6 +1528,25 @@ class EugeneCore:
         self.logger = logger.bind(component="core")
         services.event_bus.subscribe("message.received", self._handle_message_event)
         services.event_bus.subscribe("message.response", self._handle_response_event)
+        services.event_bus.subscribe("message.delta", self._handle_stream_event)
+        services.event_bus.subscribe("message.tool_call", self._handle_stream_event)
+        services.event_bus.subscribe("message.tool_call_delta", self._handle_stream_event)
+
+    async def _handle_stream_event(self, event) -> None:
+        channel_name = event.payload.get("channel", "web")
+        session_id = event.payload.get("session_id")
+        if not session_id:
+            return
+        
+        if channel_name == "web":
+            websocket = self.services.channels.web_sessions.get(session_id)
+            if websocket:
+                payload = dict(event.payload)
+                payload["type"] = event.event_type
+                try:
+                    await websocket.send_json(payload)
+                except Exception:
+                    pass
 
     async def _handle_message_event(self, event) -> None:
         raw = event.payload["message"]
@@ -1615,23 +1705,35 @@ class EugeneCore:
             for tool in applet.get_tools():
                 if tool.name == call.name:
                     tool_logger.debug("Dispatch target applet={applet}", applet=applet.name)
-                    output = await applet.handle_tool(call.name, runtime_arguments)
-                    tool_logger.info("Dispatch success output={output}", output=preview(output))
-                    return output
+                    try:
+                        output = await applet.handle_tool(call.name, runtime_arguments)
+                        tool_logger.info("Dispatch success output={output}", output=preview(output))
+                        return output
+                    except Exception as e:
+                        tool_logger.error("Dispatch applet tool failed error={error}", error=str(e))
+                        return {"error": f"Tool execution failed: {e}"}
         for applet in selected_applets:
             for tool in applet.get_tools():
                 if tool.name == call.name:
                     tool_logger.debug("Dispatch target applet={applet}", applet=applet.name)
-                    output = await applet.handle_tool(call.name, runtime_arguments)
-                    tool_logger.info("Dispatch success output={output}", output=preview(output))
-                    return output
+                    try:
+                        output = await applet.handle_tool(call.name, runtime_arguments)
+                        tool_logger.info("Dispatch success output={output}", output=preview(output))
+                        return output
+                    except Exception as e:
+                        tool_logger.error("Dispatch selected applet tool failed error={error}", error=str(e))
+                        return {"error": f"Tool execution failed: {e}"}
         # Fallback: check running MCP servers
         mcp_server = self.services.mcp.find_server_for_tool(call.name)
         if mcp_server:
             tool_logger.debug("Dispatch target mcp_server={server}", server=mcp_server)
-            output = await self.services.mcp.call_tool(mcp_server, call.name, runtime_arguments)
-            tool_logger.info("Dispatch success (MCP) output={output}", output=preview(output))
-            return output
+            try:
+                output = await self.services.mcp.call_tool(mcp_server, call.name, runtime_arguments)
+                tool_logger.info("Dispatch success (MCP) output={output}", output=preview(output))
+                return output
+            except Exception as e:
+                tool_logger.error("Dispatch MCP tool failed error={error}", error=str(e))
+                return {"error": f"MCP tool execution failed: {e}"}
         tool_logger.error("Dispatch failed unknown tool")
         return {"error": f"Unknown tool {call.name}"}
 

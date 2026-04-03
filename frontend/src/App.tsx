@@ -54,10 +54,18 @@ function ShikiCode({ code, language }: { code: string; language: string }) {
   return <div className="shiki-wrapper" dangerouslySetInnerHTML={{ __html: html }} />
 }
 
+type ToolCall = {
+  id: string
+  name: string
+  args: string
+  finished: boolean
+}
+
 type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
   text: string
+  toolCalls?: ToolCall[]
 }
 
 type ConversationRecord = {
@@ -260,11 +268,62 @@ export default function App() {
       const hasMessage = existing.some((item) => item.id === messageId)
       const next = hasMessage
         ? existing.map((item) => (item.id === messageId ? { ...item, text } : item))
-        : [...existing, { id: messageId, role: 'assistant', text }]
+        : [...existing, { id: messageId, role: 'assistant' as const, text }]
       return {
         ...current,
         [sessionId]: next,
       }
+    })
+  }
+
+  function addToolCall(sessionId: string, messageId: string, toolCallId: string, name: string) {
+    setMessages((current) => {
+      const existing = current[sessionId] ?? []
+      const next = existing.map((item) => {
+        if (item.id === messageId) {
+          const toolCalls = item.toolCalls ?? []
+          if (!toolCalls.some((tc) => tc.id === toolCallId)) {
+            return {
+              ...item,
+              toolCalls: [...toolCalls, { id: toolCallId, name, args: '', finished: false }],
+            }
+          }
+        }
+        return item
+      })
+      return { ...current, [sessionId]: next }
+    })
+  }
+
+  function appendToolCallArgs(sessionId: string, messageId: string, toolCallId: string, argsDelta: string) {
+    setMessages((current) => {
+      const existing = current[sessionId] ?? []
+      const next = existing.map((item) => {
+        if (item.id === messageId && item.toolCalls) {
+          return {
+            ...item,
+            toolCalls: item.toolCalls.map((tc) => (tc.id === toolCallId ? { ...tc, args: tc.args + argsDelta } : tc)),
+          }
+        }
+        return item
+      })
+      return { ...current, [sessionId]: next }
+    })
+  }
+
+  function finishToolCalls(sessionId: string, messageId: string) {
+    setMessages((current) => {
+      const existing = current[sessionId] ?? []
+      const next = existing.map((item) => {
+        if (item.id === messageId && item.toolCalls) {
+          return {
+            ...item,
+            toolCalls: item.toolCalls.map((tc) => ({ ...tc, finished: true })),
+          }
+        }
+        return item
+      })
+      return { ...current, [sessionId]: next }
     })
   }
 
@@ -340,9 +399,10 @@ export default function App() {
       setError('')
     }
     socket.onmessage = (event) => {
-      const payload = JSON.parse(event.data) as { type?: string; text?: string; delta?: string }
+      const payload = JSON.parse(event.data) as any
       const eventType = payload.type ?? 'message.response'
-      if (eventType === 'message.delta' && payload.delta) {
+
+      if (['message.delta', 'message.tool_call', 'message.tool_call_delta'].includes(eventType)) {
         let messageId = streamingMessageBySessionRef.current[sessionId]
         if (!messageId) {
           messageId = `${sessionId}-assistant-stream-${crypto.randomUUID()}`
@@ -353,7 +413,15 @@ export default function App() {
             text: '',
           })
         }
-        appendToMessage(sessionId, messageId, payload.delta)
+        
+        if (eventType === 'message.delta' && payload.delta) {
+          appendToMessage(sessionId, messageId, payload.delta)
+        } else if (eventType === 'message.tool_call' && payload.tool_call_id) {
+          addToolCall(sessionId, messageId, payload.tool_call_id, payload.name || 'tool')
+        } else if (eventType === 'message.tool_call_delta' && payload.tool_call_id) {
+          appendToolCallArgs(sessionId, messageId, payload.tool_call_id, payload.arguments_delta || '')
+        }
+        
         updateConversation(sessionId, {
           updatedAt: new Date().toISOString(),
         })
@@ -366,6 +434,7 @@ export default function App() {
       const streamedMessageId = streamingMessageBySessionRef.current[sessionId]
       if (streamedMessageId) {
         upsertAssistantMessage(sessionId, streamedMessageId, payload.text)
+        finishToolCalls(sessionId, streamedMessageId)
         streamingMessageBySessionRef.current[sessionId] = null
       } else {
         addMessage(sessionId, {
@@ -670,6 +739,25 @@ export default function App() {
                     >
                       {item.text}
                     </ReactMarkdown>
+                    {item.toolCalls && item.toolCalls.length > 0 && (
+                      <div className="tool-calls-container">
+                        {item.toolCalls.map((tc) => (
+                          <div key={tc.id} className={`tool-call-card ${tc.finished ? 'finished' : 'running'}`}>
+                            <div className="tool-call-header">
+                              <span className="tool-name">
+                                {icon('spark')} {tc.name}
+                              </span>
+                              {!tc.finished && <span className="tool-spinner" />}
+                            </div>
+                            <div className="tool-args">
+                              <pre>
+                                <code>{tc.args || '…'}</code>
+                              </pre>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <p className="message-text">{item.text}</p>

@@ -1,6 +1,6 @@
 api_key = "sum"
-default_model = "nvidia_nim/deepseek-ai/deepseek-v3.2"
-router_model = "groq/llama-3.1-8b-instant"
+default_model = "groq/openai/gpt-oss-120b"
+router_model = "openai/gpt-5.4-mini"
 fallback_model = ""
 compressPrompt = false
 compressPromptRate = 0.5
