@@ -10,3 +10,6 @@ preamble_preferences = "minimal"
 [behavior]
 uncertainty = "say when uncertain and prefer checking available tools"
 clarification = "ask only when ambiguity materially changes the outcome"
+
+[user_preferences]
+favorite_number = 7
