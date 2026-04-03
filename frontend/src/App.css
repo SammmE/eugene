@@ -937,18 +937,21 @@ button:focus-visible {
 /* ── Tool Calls ── */
 .tool-calls-container {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   margin-top: 16px;
   max-width: 100%;
 }
 
 .tool-call-card {
   border: 1px solid var(--line);
-  background: var(--bg-color);
+  background: rgba(0, 0, 0, 0.02);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border-radius: 8px;
   overflow: hidden;
   font-size: 13px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  transition: all 250ms ease;
 }
 
 .tool-call-card.running {
@@ -957,12 +960,33 @@ button:focus-visible {
 }
 
 .tool-call-header {
-  padding: 8px 12px;
-  background: var(--line);
+  width: 100%;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.05);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  transition: background 250ms ease;
+  border-radius: 0;
+  color: var(--ink);
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+
+.tool-call-header:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.tool-call-card.expanded .tool-call-header {
   border-bottom: 1px solid var(--line);
+}
+
+.tool-chevron {
+  font-size: 10px;
+  color: var(--muted);
 }
 
 .tool-name {
@@ -974,17 +998,52 @@ button:focus-visible {
   color: var(--ink);
 }
 
-.tool-args {
-  padding: 12px;
+.tool-body {
+  animation: slide-down 200ms ease-out forwards;
+  transform-origin: top;
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tool-section {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-color);
+}
+.tool-section:last-child {
+  border-bottom: none;
+}
+
+.tool-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.tool-args, .tool-result {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   color: var(--ink);
   overflow-x: auto;
   white-space: pre-wrap;
-  background: var(--bg-color);
   font-size: 12px;
 }
 
-.tool-args code {
+.tool-args pre, .tool-result pre {
+  margin: 0;
+  font-family: inherit;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.tool-args code, .tool-result code {
   color: inherit;
   background: transparent;
   padding: 0;

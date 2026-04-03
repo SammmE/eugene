@@ -1531,6 +1531,7 @@ class EugeneCore:
         services.event_bus.subscribe("message.delta", self._handle_stream_event)
         services.event_bus.subscribe("message.tool_call", self._handle_stream_event)
         services.event_bus.subscribe("message.tool_call_delta", self._handle_stream_event)
+        services.event_bus.subscribe("message.tool_result", self._handle_stream_event)
 
     async def _handle_stream_event(self, event) -> None:
         channel_name = event.payload.get("channel", "web")
@@ -1626,10 +1627,20 @@ class EugeneCore:
                         session_id=prompt.session_id,
                         source_channel=normalized.source_channel,
                     )
+                    serialized_output = self._serialize_tool_output(call.name, output)
+                    
+                    if normalized.source_channel == "web":
+                        await self.services.event_bus.publish("message.tool_result", {
+                            "session_id": prompt.session_id,
+                            "tool_call_id": call.id or call.name,
+                            "result": serialized_output,
+                            "channel": "web"
+                        })
+                        
                     prompt.messages.append(
                         {
                             "role": "tool",
-                            "content": self._serialize_tool_output(call.name, output),
+                            "content": serialized_output,
                             "tool_call_id": call.id or call.name,
                             "name": call.name,
                             "session_id": prompt.session_id,

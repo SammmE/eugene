@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { type Highlighter, createHighlighter } from 'shiki'
 import './App.css'
 import { apiRequest, createChatSocket, deleteConversationHistory, uploadFile } from './lib/api'
@@ -59,6 +60,7 @@ type ToolCall = {
   name: string
   args: string
   finished: boolean
+  result?: string
 }
 
 type ChatMessage = {
@@ -159,6 +161,47 @@ function icon(name: 'plus' | 'upload' | 'send' | 'refresh' | 'spark' | 'clock' |
     <svg aria-hidden="true" viewBox="0 0 24 24" className="ui-icon">
       <path d={paths[name]} />
     </svg>
+  )
+}
+
+function ToolCallCard({ tc }: { tc: ToolCall }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className={`tool-call-card ${tc.finished ? 'finished' : 'running'} ${expanded ? 'expanded' : ''}`}>
+      <button type="button" className="tool-call-header" onClick={() => setExpanded(!expanded)}>
+        <span className="tool-name">
+          {icon('spark')} {tc.name}
+        </span>
+        {!tc.finished ? (
+          <span className="tool-spinner" />
+        ) : (
+          <span className="tool-chevron">{expanded ? '▲' : '▼'}</span>
+        )}
+      </button>
+      {expanded && (
+        <div className="tool-body">
+          <div className="tool-section">
+            <span className="tool-label">Arguments</span>
+            <div className="tool-args">
+              <pre>
+                <code>{tc.args || '…'}</code>
+              </pre>
+            </div>
+          </div>
+          {tc.result && (
+            <div className="tool-section">
+              <span className="tool-label">Result</span>
+              <div className="tool-result">
+                <pre>
+                  <code>{tc.result}</code>
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -311,6 +354,22 @@ export default function App() {
     })
   }
 
+  function addToolResult(sessionId: string, messageId: string, toolCallId: string, result: string) {
+    setMessages((current) => {
+      const existing = current[sessionId] ?? []
+      const next = existing.map((item) => {
+        if (item.id === messageId && item.toolCalls) {
+          return {
+            ...item,
+            toolCalls: item.toolCalls.map((tc) => (tc.id === toolCallId ? { ...tc, result, finished: true } : tc)),
+          }
+        }
+        return item
+      })
+      return { ...current, [sessionId]: next }
+    })
+  }
+
   function finishToolCalls(sessionId: string, messageId: string) {
     setMessages((current) => {
       const existing = current[sessionId] ?? []
@@ -420,6 +479,8 @@ export default function App() {
           addToolCall(sessionId, messageId, payload.tool_call_id, payload.name || 'tool')
         } else if (eventType === 'message.tool_call_delta' && payload.tool_call_id) {
           appendToolCallArgs(sessionId, messageId, payload.tool_call_id, payload.arguments_delta || '')
+        } else if (eventType === 'message.tool_result' && payload.tool_call_id) {
+          addToolResult(sessionId, messageId, payload.tool_call_id, payload.result || '')
         }
         
         updateConversation(sessionId, {
@@ -723,6 +784,7 @@ export default function App() {
                 {item.role === 'assistant' ? (
                   <div className="message-text markdown-body">
                     <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
                       components={{
                         code({ className, children, ...props }) {
                           const match = /language-(\w+)/.exec(className || '')
@@ -742,19 +804,7 @@ export default function App() {
                     {item.toolCalls && item.toolCalls.length > 0 && (
                       <div className="tool-calls-container">
                         {item.toolCalls.map((tc) => (
-                          <div key={tc.id} className={`tool-call-card ${tc.finished ? 'finished' : 'running'}`}>
-                            <div className="tool-call-header">
-                              <span className="tool-name">
-                                {icon('spark')} {tc.name}
-                              </span>
-                              {!tc.finished && <span className="tool-spinner" />}
-                            </div>
-                            <div className="tool-args">
-                              <pre>
-                                <code>{tc.args || '…'}</code>
-                              </pre>
-                            </div>
-                          </div>
+                          <ToolCallCard key={tc.id} tc={tc} />
                         ))}
                       </div>
                     )}
