@@ -1,30 +1,92 @@
+# [Eugene] Core Data
+# Logs, databases, and temporary application runtime files
+eugene_data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# [Backend] Python
+# General Python artifacts and virtual environments
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-
-.venv/
-venv/
+*$py.class
+*.so
+.Python
 env/
+venv/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
+# [Frontend] Node.js
+# Dependencies and build outputs for the frontend project
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.npm
+.eslintcache
+.stylelintcache
+
+# [Vite] Build Outputs
+# The static folder is populated by the frontend build process.
+# We ignore the assets and index.html/favicon.svg specifically.
+static/assets/
+static/index.html
+static/favicon.svg
+
+# [Environmental Secrets]
+# NEVER commit .env files containing API keys or passwords.
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
 .env.*
 !.env.example
 
+# [Testing]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 .coverage.*
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
 htmlcov/
 
+# [IDEs & Editors]
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# [OS Artifacts]
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
-
-frontend/node_modules/
-frontend/dist/
-
-eugene_data/
-*.sqlite3
-
-*.log
