@@ -156,12 +156,13 @@ def build_api_router() -> APIRouter:
     return router
 
 
-async def authenticate_websocket(websocket: WebSocket, api_key: str) -> None:
+async def authenticate_websocket(websocket: WebSocket, api_key: str) -> bool:
     supplied = websocket.query_params.get("api_key") or websocket.headers.get("x-api-key")
     if supplied != api_key:
         logger.bind(component="api", path="/ws", client=str(websocket.client)).warning("Invalid websocket API key")
         await websocket.close(code=4401)
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        return False
+    return True
 
 
 def websocket_message(text: str, session_id: str, attachments: list[str] | None = None) -> Message:

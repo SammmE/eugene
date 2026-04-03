@@ -78,12 +78,26 @@ app = FastAPI(title="Eugene", lifespan=lifespan)
 app.include_router(build_api_router())
 
 
+@app.websocket("/ws/frontend-reload")
+async def frontend_reload_websocket(websocket: WebSocket) -> None:
+    app_state: AppState = websocket.app.state.app_state
+    await websocket.accept()
+    app_state.services.frontend_reload.register_client(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        app_state.services.frontend_reload.unregister_client(websocket)
+
+
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
     app_state: AppState = websocket.app.state.app_state
     ws_logger = logger.bind(component="websocket", session_id=session_id)
     ws_logger.info("WebSocket authentication start")
-    await authenticate_websocket(websocket, app_state.services.config.api_key)
+    is_authenticated = await authenticate_websocket(websocket, app_state.services.config.api_key)
+    if not is_authenticated:
+        return
     await websocket.accept()
     ws_logger.info("WebSocket connected")
     app_state.services.channels.register_websocket(session_id, websocket)
@@ -96,18 +110,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
     except WebSocketDisconnect:
         ws_logger.info("WebSocket disconnected")
         app_state.services.channels.unregister_websocket(session_id)
-
-
-@app.websocket("/ws/frontend-reload")
-async def frontend_reload_websocket(websocket: WebSocket) -> None:
-    app_state: AppState = websocket.app.state.app_state
-    await websocket.accept()
-    app_state.services.frontend_reload.register_client(websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        app_state.services.frontend_reload.unregister_client(websocket)
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

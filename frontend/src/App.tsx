@@ -1,7 +1,58 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
+import ReactMarkdown from 'react-markdown'
+import { type Highlighter, createHighlighter } from 'shiki'
 import './App.css'
 import { apiRequest, createChatSocket, deleteConversationHistory, uploadFile } from './lib/api'
 import type { EugeneApplet, EugeneHealth, EugeneSchedule, EugeneUsage } from './lib/api'
+
+let highlighterPromise: Promise<Highlighter> | null = null
+
+function getHighlighter() {
+  if (!highlighterPromise) {
+    highlighterPromise = createHighlighter({
+      themes: ['one-dark-pro'],
+      langs: [
+        'javascript', 'typescript', 'python', 'bash', 'json', 'html', 'css',
+        'rust', 'go', 'java', 'c', 'cpp', 'sql', 'yaml', 'toml', 'markdown',
+        'tsx', 'jsx', 'shell', 'plaintext',
+      ],
+    })
+  }
+  return highlighterPromise
+}
+
+function ShikiCode({ code, language }: { code: string; language: string }) {
+  const [html, setHtml] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    getHighlighter().then(async (highlighter) => {
+      if (cancelled) return
+      const loadedLangs = highlighter.getLoadedLanguages()
+      let lang = language
+      if (!loadedLangs.includes(lang)) {
+        try {
+          await highlighter.loadLanguage(lang as Parameters<typeof highlighter.loadLanguage>[0])
+        } catch {
+          lang = 'plaintext'
+        }
+      }
+      if (cancelled) return
+      setHtml(
+        highlighter.codeToHtml(code, {
+          lang,
+          theme: 'one-dark-pro',
+        }),
+      )
+    })
+    return () => { cancelled = true }
+  }, [code, language])
+
+  if (!html) {
+    return <pre className="shiki-fallback"><code>{code}</code></pre>
+  }
+  return <div className="shiki-wrapper" dangerouslySetInnerHTML={{ __html: html }} />
+}
 
 type ChatMessage = {
   id: string
@@ -600,7 +651,29 @@ export default function App() {
               <div className="message-avatar">{item.role === 'assistant' ? 'E' : 'Y'}</div>
               <div className="message-card">
                 <p className="message-role">{item.role === 'assistant' ? 'Eugene' : 'You'}</p>
-                <p className="message-text">{item.text}</p>
+                {item.role === 'assistant' ? (
+                  <div className="message-text markdown-body">
+                    <ReactMarkdown
+                      components={{
+                        code({ className, children, ...props }) {
+                          const match = /language-(\w+)/.exec(className || '')
+                          const codeString = String(children).replace(/\n$/, '')
+                          return match ? (
+                            <ShikiCode code={codeString} language={match[1]} />
+                          ) : (
+                            <code className={className} {...props}>
+                              {children}
+                            </code>
+                          )
+                        },
+                      }}
+                    >
+                      {item.text}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="message-text">{item.text}</p>
+                )}
               </div>
             </article>
           ))}

@@ -92,10 +92,13 @@ PROVIDER_ENV_REQUIREMENTS = {
     "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
     "google": ("GOOGLE_API_KEY",),
     "groq": ("GROQ_API_KEY",),
+    "nvidia_nim": ("NVIDIA_NIM_API_KEY",),
     "mistral": ("MISTRAL_API_KEY",),
     "xai": ("XAI_API_KEY",),
     "ollama": (),
 }
+
+NVIDIA_NIM_DEFAULT_API_BASE = "https://integrate.api.nvidia.com/v1/"
 
 
 class PromptCompressionService:
@@ -467,7 +470,17 @@ class ProviderService:
     async def enforce_context_threshold(self, model: str, messages: list[dict[str, Any]]) -> None:
         if get_max_tokens is None:
             return
-        max_context = get_max_tokens(model) or 0
+        resolved_model, model_kwargs = self._prepare_litellm_request(model)
+        try:
+            max_context = get_max_tokens(
+                resolved_model,
+                custom_llm_provider=model_kwargs.get("custom_llm_provider"),
+            ) or 0
+        except Exception:
+            logger.bind(component="provider", model=model).debug(
+                "Skipping context-window lookup because model metadata is unavailable"
+            )
+            return
         if max_context <= 0:
             return
         approximate = sum(len(item.get("content", "")) for item in messages) // 4
@@ -487,15 +500,25 @@ class ProviderService:
         outbound_messages = [self._sanitize_message(item) for item in messages]
         if self.services.compressor is not None:
             outbound_messages = self.services.compressor.compress_messages(outbound_messages, origin=origin, model=model)
+        resolved_model, request_kwargs = self._prepare_litellm_request(model)
         logger.bind(component="provider", origin=origin).debug(
-            "Calling LLM model={model} messages={messages} tools={tools}",
+            "Calling LLM model={model} resolved_model={resolved_model} messages={messages} tools={tools}",
             model=model,
+            resolved_model=resolved_model,
             messages=len(outbound_messages),
             tools=len(tools or []),
         )
-        response = await acompletion(model=model, messages=outbound_messages, tools=tools or None, tool_choice="auto" if tools else None)
+        response = await acompletion(
+            model=resolved_model,
+            messages=outbound_messages,
+            tools=tools or None,
+            tool_choice="auto" if tools else None,
+            **request_kwargs,
+        )
         choice = response["choices"][0]["message"]
         usage = response.get("usage", {})
+        raw_tool_calls = choice.get("tool_calls") or []
+        normalized_tool_calls = [self._normalize_tool_call_payload(item) for item in raw_tool_calls]
         result = LLMResult(
             text=choice.get("content") or "",
             tool_calls=[
@@ -504,8 +527,9 @@ class ProviderService:
                     name=item["function"]["name"],
                     arguments=json.loads(item["function"]["arguments"] or "{}"),
                 )
-                for item in (choice.get("tool_calls") or [])
+                for item in normalized_tool_calls
             ],
+            tool_calls_payload=normalized_tool_calls,
             model=model,
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
@@ -521,6 +545,29 @@ class ProviderService:
         )
         await self._log(result, origin)
         return result
+
+    def _prepare_litellm_request(self, model: str) -> tuple[str, dict[str, Any]]:
+        if model.startswith("nvidia_nim/"):
+            stripped_model = model.split("/", 1)[1]
+            api_base = os.getenv("NVIDIA_NIM_API_BASE", NVIDIA_NIM_DEFAULT_API_BASE).strip() or NVIDIA_NIM_DEFAULT_API_BASE
+            return stripped_model, {
+                "custom_llm_provider": "nvidia_nim",
+                "api_base": api_base,
+            }
+        return model, {}
+
+    def _normalize_tool_call_payload(self, item: Any) -> dict[str, Any]:
+        if isinstance(item, dict):
+            return item
+        if hasattr(item, "model_dump"):
+            dumped = item.model_dump(mode="json")
+            if isinstance(dumped, dict):
+                return dumped
+        if hasattr(item, "dict"):
+            dumped = item.dict()
+            if isinstance(dumped, dict):
+                return dumped
+        raise TypeError(f"Unsupported tool call payload type: {type(item).__name__}")
 
     def _parse_router_response(self, text: str) -> list[str] | None:
         try:
@@ -564,7 +611,7 @@ class ProviderService:
         return None
 
     def _sanitize_message(self, message: dict[str, Any]) -> dict[str, Any]:
-        allowed_keys = {"role", "content", "name", "tool_call_id"}
+        allowed_keys = {"role", "content", "name", "tool_call_id", "tool_calls"}
         sanitized = {key: value for key, value in message.items() if key in allowed_keys}
         return sanitized
 
@@ -1456,7 +1503,14 @@ class EugeneCore:
             )
             depth = 0
             while result.tool_calls and depth < self.services.config.max_tool_depth:
-                prompt.messages.append({"role": "assistant", "content": result.text, "session_id": prompt.session_id})
+                prompt.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": result.text or "",
+                        "tool_calls": result.tool_calls_payload,
+                        "session_id": prompt.session_id,
+                    }
+                )
                 for call in result.tool_calls:
                     output = await self._dispatch_tool(
                         call,

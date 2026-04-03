@@ -64,6 +64,7 @@ class ToolCall(BaseModel):
 class LLMResult(BaseModel):
     text: str = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
+    tool_calls_payload: list[dict[str, Any]] = Field(default_factory=list)
     model: str
     prompt_tokens: int = 0
     completion_tokens: int = 0

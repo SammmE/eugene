@@ -5,33 +5,10 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Eugene</title>
-    <script type="module" crossorigin src="/assets/index-Cfz1X1Fw.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-CWxkAvBW.css">
+    <script type="module" crossorigin src="/assets/index-CCKVvoje.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DWURmWtu.css">
   </head>
   <body>
-    <div id="root"></div>
-    <script>
-      (function () {
-        var protocol = window.location.protocol === "https:" ? "wss" : "ws";
-        var url = protocol + "://" + window.location.host + "/ws/frontend-reload";
-        function connect() {
-          var ws = new WebSocket(url);
-          ws.onmessage = function (event) {
-            try {
-              var payload = JSON.parse(event.data);
-              if (payload && payload.type === "frontend.reload") {
-                window.location.reload();
-              }
-            } catch (e) {
-              // ignore
-            }
-          };
-          ws.onclose = function () {
-            window.setTimeout(connect, 1000);
-          };
-        }
-        connect();
-      })();
-    </script>
+    <div id="root"></div>
   </body>
 </html>

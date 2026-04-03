@@ -1,3 +1,0 @@
-[applet.filesystem]
-description = "Provides sandboxed file system access rooted at a configured path."
-root_path = "."

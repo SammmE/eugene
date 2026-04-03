@@ -246,6 +246,7 @@ Provider credentials are expected via environment vars based on configured model
 - `gemini/*` -> `GEMINI_API_KEY` or `GOOGLE_API_KEY`
 - `google/*` -> `GOOGLE_API_KEY`
 - `groq/*` -> `GROQ_API_KEY`
+- `nvidia_nim/*` -> `NVIDIA_NIM_API_KEY`
 - `mistral/*` -> `MISTRAL_API_KEY`
 - `xai/*` -> `XAI_API_KEY`
 - `ollama/*` -> no key required
