@@ -1,2 +1,3 @@
 [applet.personality]
 description = "Reads and updates Eugene's personality configuration."
+personality_file = ""

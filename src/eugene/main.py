@@ -11,7 +11,7 @@ from eugene.api import authenticate_websocket, build_api_router, websocket_messa
 from eugene.config import STATIC_DIR, ensure_runtime_dirs, load_config
 from eugene.core import EventBus, ServiceContainer
 from eugene.logging_utils import setup_logging
-from eugene.services import AppletManager, ChannelManager, EugeneCore, FileHandler, FrontendReloadService, MCPManager, MemoryService, PersonalityService, PromptCompressionService, ProviderService, SchedulerService
+from eugene.services import AppletManager, ChannelManager, EugeneCore, FileHandler, FrontendReloadService, MCPManager, MemoryService, PromptCompressionService, ProviderService, SchedulerService
 
 
 @dataclass
@@ -35,7 +35,6 @@ async def lifespan(app: FastAPI):
     services = ServiceContainer(config=config, event_bus=event_bus)
     services.compressor = PromptCompressionService(services)
     services.frontend_reload = FrontendReloadService(services)
-    services.personality = PersonalityService(services)
     services.provider = ProviderService(services)
     services.memory = MemoryService(services)
     services.mcp = MCPManager(services)
@@ -49,7 +48,6 @@ async def lifespan(app: FastAPI):
 
     await event_bus.start()
     await services.provider.initialize()
-    await services.personality.start()
     await services.memory.initialize()
     await services.compressor.initialize()
     await services.scheduler.initialize()
@@ -59,6 +57,7 @@ async def lifespan(app: FastAPI):
     await services.mcp.start_eager()
     for prefix, router in services.applets.routes():
         app.include_router(router, prefix=prefix)
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     await services.channels.start()
     await services.scheduler.start()
     await services.frontend_reload.start()
@@ -69,7 +68,6 @@ async def lifespan(app: FastAPI):
     await services.scheduler.stop()
     await services.channels.stop()
     await services.mcp.stop()
-    await services.personality.stop()
     await event_bus.stop()
     logger.bind(component="shutdown").info("Eugene shutdown complete")
 
@@ -111,5 +109,3 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
         ws_logger.info("WebSocket disconnected")
         app_state.services.channels.unregister_websocket(session_id)
 
-
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
