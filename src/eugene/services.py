@@ -6,6 +6,7 @@ import json
 import mimetypes
 import os
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +21,7 @@ from pydantic import BaseModel, Field
 from eugene.config import APPLETS_DIR, CHANNELS_DIR, DATA_DIR, ROOT_DIR, load_toml
 from eugene.core import AppletBase, ChannelBase, ServiceContainer, WorkingMemory, discover_subclass
 from eugene.logging_utils import preview
-from eugene.models import AppletRecord, Attachment, ChannelStatus, LLMResult, Message, ProviderCheckResult, ScheduledTask, ToolCall, ToolDefinition, TriggerKind
+from eugene.models import AppletRecord, Attachment, ChannelStatus, LLMResult, Message, ProactiveTrigger, ProviderCheckResult, ScheduledTask, ToolCall, ToolDefinition, TriggerKind
 
 try:
     import magic  # type: ignore
@@ -1143,6 +1144,11 @@ class AppletManager:
         self.instances[name] = instance
         record.instance = instance
         record.status = "loaded"
+        scheduler = getattr(self.services, "scheduler", None)
+        if scheduler is not None:
+            for task in instance.get_scheduled_tasks():
+                if task.id not in scheduler.tasks:
+                    await scheduler.register(task)
         if type(instance).on_event is not AppletBase.on_event:
             for event_name in ("message.received", "file.attached", "task.fired", "memory.stored", "personality.updated"):
                 self.services.event_bus.subscribe(event_name, instance.on_event)
@@ -1190,10 +1196,25 @@ class AppletManager:
             tools.extend(await self.services.mcp.get_tools(applet))
         return tools
 
+    async def trigger_catalog_block(self) -> str:
+        lines: list[str] = ["Trigger emitters:"]
+        found = False
+        for name, record in self.registry.items():
+            if not record.enabled:
+                continue
+            instance = await self.load_applet(name)
+            for definition in instance.get_trigger_definitions():
+                found = True
+                lines.append(f"- {definition.applet_name}.{definition.name}: {definition.description}")
+        if not found:
+            lines.append("- none")
+        return "\n".join(lines)
+
     def awareness_block(self) -> str:
         applet_lines = [f"- {item.name}: {item.description}" for item in self.registry.values() if item.enabled]
         channel_lines = [f"- {item.name}: {'connected' if item.connected else 'idle'}" for item in self.services.channels.statuses().values()]
         task_count = len(self.services.scheduler.tasks)
+        proactive_count = len(getattr(self.services.proactive, "triggers", {}))
         mcp_registry = self.services.mcp.get_registry_for_router()
         mcp_lines = [f"- {s['name']}: {s['description']}" for s in mcp_registry] if mcp_registry else ["- none"]
         mcp_running = list(self.services.mcp._running.keys())
@@ -1210,6 +1231,7 @@ class AppletManager:
             "Connected channels:",
             *(channel_lines or ["- none"]),
             f"Scheduled tasks: {task_count}",
+            f"Proactive triggers: {proactive_count}",
         ])
         return "\n".join(parts)
 
@@ -1383,6 +1405,155 @@ class ChannelManager:
             self._status[name].connected = False
             self._status[name].details = str(exc)
             logger.bind(component="channels", channel=name).exception("Channel failed to start")
+
+
+class ProactiveTriggerService:
+    def __init__(self, services: ServiceContainer) -> None:
+        self.services = services
+        self.db_path = DATA_DIR / "eugene.db"
+        self.triggers: dict[str, ProactiveTrigger] = {}
+        self._index: dict[tuple[str, str], list[str]] = defaultdict(list)
+
+    async def initialize(self) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                create table if not exists proactive_triggers (
+                    id text primary key,
+                    payload text not null
+                )
+                """
+            )
+            await db.commit()
+
+    async def start(self) -> None:
+        await self._load_persisted_triggers()
+
+    async def stop(self) -> None:
+        return None
+
+    async def register(self, trigger: ProactiveTrigger) -> ProactiveTrigger:
+        now = datetime.utcnow()
+        trigger.updated_at = now
+        self.triggers[trigger.id] = trigger
+        await self._persist(trigger)
+        self._rebuild_index()
+        await self.services.event_bus.publish("proactive.trigger_registered", {"trigger_id": trigger.id})
+        logger.bind(component="proactive", trigger_id=trigger.id).info(
+            "Registered proactive trigger name={name} source={source} signal={signal}",
+            name=trigger.name,
+            source=trigger.source_applet,
+            signal=trigger.signal_name,
+        )
+        return trigger
+
+    async def delete(self, trigger_id: str) -> None:
+        self.triggers.pop(trigger_id, None)
+        self._rebuild_index()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("delete from proactive_triggers where id = ?", (trigger_id,))
+            await db.commit()
+
+    async def emit(self, *, applet_name: str, signal_name: str, payload: dict[str, Any]) -> int:
+        candidate_ids = self._index.get((applet_name, signal_name), [])
+        if not candidate_ids:
+            return 0
+        fired = 0
+        for trigger_id in candidate_ids:
+            trigger = self.triggers.get(trigger_id)
+            if trigger is None or not trigger.enabled:
+                continue
+            if not self._matches(trigger, payload):
+                continue
+            if self._cooldown_active(trigger):
+                continue
+            await self._fire_trigger(trigger, payload)
+            fired += 1
+        return fired
+
+    def available_signal_map(self) -> dict[str, list[str]]:
+        signal_map: dict[str, list[str]] = {}
+        for instance in self.services.applets.instances.values():
+            names = [definition.name for definition in instance.get_trigger_definitions()]
+            if names:
+                signal_map[instance.name] = names
+        return signal_map
+
+    def _matches(self, trigger: ProactiveTrigger, payload: dict[str, Any]) -> bool:
+        for key, expected in trigger.match_required.items():
+            if payload.get(key) != expected:
+                return False
+        for key, needle in trigger.match_contains.items():
+            haystack = payload.get(key)
+            if haystack is None or str(needle).lower() not in str(haystack).lower():
+                return False
+        return True
+
+    def _cooldown_active(self, trigger: ProactiveTrigger) -> bool:
+        if trigger.cooldown_seconds <= 0 or trigger.last_fired_at is None:
+            return False
+        delta = datetime.utcnow() - trigger.last_fired_at
+        return delta.total_seconds() < trigger.cooldown_seconds
+
+    async def _fire_trigger(self, trigger: ProactiveTrigger, payload: dict[str, Any]) -> None:
+        source_channel = trigger.origin_channel or self.services.config.primary_channel or "web"
+        session_id = trigger.session_id or str(uuid4())
+        if source_channel == "web":
+            if trigger.session_id and trigger.session_id in self.services.channels.web_sessions:
+                session_id = trigger.session_id
+            elif self.services.channels.web_sessions:
+                session_id = next(iter(self.services.channels.web_sessions))
+            elif self.services.config.primary_channel and self.services.config.primary_channel != "web":
+                source_channel = self.services.config.primary_channel
+        event_context = {
+            "source_applet": trigger.source_applet,
+            "signal_name": trigger.signal_name,
+            "payload": payload,
+        }
+        message = Message(
+            text=(
+                f"{trigger.prompt}\n\n"
+                "Proactive trigger context:\n"
+                f"{json.dumps(event_context, ensure_ascii=False, indent=2)}"
+            ),
+            source_channel=source_channel,
+            session_id=session_id,
+            trigger=TriggerKind.PROACTIVE,
+            metadata={
+                "proactive_trigger_id": trigger.id,
+                "source_applet": trigger.source_applet,
+                "signal_name": trigger.signal_name,
+                "trigger_payload": payload,
+            },
+        )
+        trigger.last_fired_at = datetime.utcnow()
+        trigger.updated_at = trigger.last_fired_at
+        await self._persist(trigger)
+        await self.services.event_bus.publish(
+            "proactive.trigger_fired",
+            {"trigger_id": trigger.id, "source_applet": trigger.source_applet, "signal_name": trigger.signal_name},
+        )
+        await self.services.event_bus.publish("message.received", {"message": message.model_dump(mode="json")})
+
+    async def _persist(self, trigger: ProactiveTrigger) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("insert or replace into proactive_triggers(id, payload) values (?, ?)", (trigger.id, trigger.model_dump_json()))
+            await db.commit()
+
+    async def _load_persisted_triggers(self) -> None:
+        self.triggers.clear()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("select payload from proactive_triggers")
+            rows = await cursor.fetchall()
+        for row in rows:
+            trigger = ProactiveTrigger.model_validate_json(row[0])
+            self.triggers[trigger.id] = trigger
+        self._rebuild_index()
+
+    def _rebuild_index(self) -> None:
+        self._index.clear()
+        for trigger in self.triggers.values():
+            self._index[(trigger.source_applet, trigger.signal_name)].append(trigger.id)
 
 
 class SchedulerService:
@@ -1679,6 +1850,12 @@ class EugeneCore:
     async def _build_prompt(self, message: Message, selected_names: list[str]) -> PromptBundle:
         system_parts = list(await self.services.applets.context_blocks())
         system_parts.append(self.services.applets.awareness_block())
+        system_parts.append(await self.services.applets.trigger_catalog_block())
+        if message.trigger == TriggerKind.PROACTIVE:
+            system_parts.append(
+                "This message was triggered proactively by an applet-emitted condition. "
+                "Act on the trigger context in the user's latest message instead of asking what to do next unless clarification is truly required."
+            )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": "\n\n".join(part for part in system_parts if part), "session_id": message.session_id}
         ]

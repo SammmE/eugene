@@ -103,6 +103,10 @@ def build_api_router() -> APIRouter:
     async def list_schedules(app_state: Any = Depends(get_app_state), _: None = Depends(require_api_key)) -> list[dict[str, Any]]:
         return [item.model_dump() for item in app_state.services.scheduler.tasks.values()]
 
+    @router.get("/triggers")
+    async def list_triggers(app_state: Any = Depends(get_app_state), _: None = Depends(require_api_key)) -> list[dict[str, Any]]:
+        return [item.model_dump(mode="json") for item in app_state.services.proactive.triggers.values()]
+
     @router.get("/token-usage")
     async def token_usage(app_state: Any = Depends(get_app_state), _: None = Depends(require_api_key)) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []

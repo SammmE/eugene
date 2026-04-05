@@ -18,6 +18,15 @@ export type EugeneSchedule = {
   trigger_value: string
 }
 
+export type EugeneTrigger = {
+  id: string
+  name: string
+  source_applet: string
+  signal_name: string
+  enabled: boolean
+  last_fired_at?: string | null
+}
+
 export type EugeneUsage = {
   timestamp: string
   model: string

@@ -11,7 +11,7 @@ from eugene.api import authenticate_websocket, build_api_router, websocket_messa
 from eugene.config import STATIC_DIR, ensure_runtime_dirs, load_config
 from eugene.core import EventBus, ServiceContainer
 from eugene.logging_utils import setup_logging
-from eugene.services import AppletManager, ChannelManager, EugeneCore, FileHandler, FrontendReloadService, MCPManager, MemoryService, PromptCompressionService, ProviderService, SchedulerService
+from eugene.services import AppletManager, ChannelManager, EugeneCore, FileHandler, FrontendReloadService, MCPManager, MemoryService, PromptCompressionService, ProactiveTriggerService, ProviderService, SchedulerService
 
 
 @dataclass
@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
     services.applets = AppletManager(services)
     services.channels = ChannelManager(services)
     services.scheduler = SchedulerService(services)
+    services.proactive = ProactiveTriggerService(services)
     services.files = FileHandler(services)
     services.core = EugeneCore(services)
     app.state.app_state = AppState(services=services)
@@ -51,6 +52,7 @@ async def lifespan(app: FastAPI):
     await services.memory.initialize()
     await services.compressor.initialize()
     await services.scheduler.initialize()
+    await services.proactive.initialize()
     await services.applets.scan()
     await services.channels.scan()
     await services.applets.load_route_applets()
@@ -60,11 +62,13 @@ async def lifespan(app: FastAPI):
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     await services.channels.start()
     await services.scheduler.start()
+    await services.proactive.start()
     await services.frontend_reload.start()
     logger.bind(component="startup").info("Eugene startup complete")
     yield
     logger.bind(component="shutdown").info("Shutting down Eugene")
     await services.frontend_reload.stop()
+    await services.proactive.stop()
     await services.scheduler.stop()
     await services.channels.stop()
     await services.mcp.stop()
@@ -108,4 +112,3 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
     except WebSocketDisconnect:
         ws_logger.info("WebSocket disconnected")
         app_state.services.channels.unregister_websocket(session_id)
-

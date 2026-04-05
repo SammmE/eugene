@@ -13,7 +13,7 @@ from fastapi import APIRouter
 from loguru import logger
 from pydantic import BaseModel
 
-from eugene.models import AppletRecord, Attachment, ConversationTurn, Event, Message, ScheduledTask, ToolDefinition
+from eugene.models import AppletRecord, Attachment, ConversationTurn, Event, Message, ScheduledTask, ToolDefinition, TriggerDefinition
 
 
 EventHandler = Callable[[Event], Awaitable[None]]
@@ -64,6 +64,9 @@ class AppletBase:
     def get_tools(self) -> list[ToolDefinition]:
         return []
 
+    def get_trigger_definitions(self) -> list[TriggerDefinition]:
+        return []
+
     def get_context_injection(self) -> str:
         return ""
 
@@ -75,6 +78,12 @@ class AppletBase:
 
     async def handle_file(self, attachment_ref: str) -> Attachment | None:
         return None
+
+    async def emit_trigger(self, signal_name: str, payload: dict[str, Any] | None = None) -> None:
+        proactive = getattr(self.services, "proactive", None)
+        if proactive is None:
+            raise RuntimeError("Proactive trigger service is not available")
+        await proactive.emit(applet_name=self.name, signal_name=signal_name, payload=payload or {})
 
 
 class ChannelBase:
@@ -180,6 +189,7 @@ class ServiceContainer:
     personality: Any = None
     memory: Any = None
     scheduler: Any = None
+    proactive: Any = None
     mcp: Any = None
     files: Any = None
     core: Any = None

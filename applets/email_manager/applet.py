@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import email
 import email.policy
 import imaplib
+import json
 import smtplib
 from email.message import EmailMessage
 from email.utils import formatdate
+from pathlib import Path
 from typing import Any
 
 from eugene.core import AppletBase, FieldSpec
-from eugene.models import ToolDefinition
+from eugene.config import DATA_DIR
+from eugene.models import ToolDefinition, TriggerDefinition
 
 
 class EmailManagerApplet(AppletBase):
@@ -18,6 +22,7 @@ class EmailManagerApplet(AppletBase):
     description = "Manage email via IMAP and SMTP."
     load = "lazy"
     inject = "selective"
+    _watch_task: asyncio.Task[None] | None
 
     class Config:
         fields = {
@@ -33,7 +38,26 @@ class EmailManagerApplet(AppletBase):
             "smtp_password": FieldSpec(default="", description="SMTP password. Set via EMAIL_MANAGER_SMTP_PASSWORD in .env."),
             "max_fetch": FieldSpec(default=20, description="Maximum emails returned by fetch_emails."),
             "default_mailbox": FieldSpec(default="INBOX", description="Default IMAP mailbox/folder."),
+            "proactive_enabled": FieldSpec(default=True, description="Poll inbox for proactive email trigger signals."),
+            "proactive_poll_seconds": FieldSpec(default=120, description="Seconds between lightweight inbox polls."),
+            "proactive_max_fetch": FieldSpec(default=10, description="Maximum unseen emails inspected per proactive poll."),
+            "urgent_keywords": FieldSpec(default="urgent,asap,immediately,action required,important", description="Comma-separated keywords used for urgency detection."),
         }
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._watch_task = None
+
+    async def on_load(self) -> None:
+        if self._cfg("proactive_enabled", True) and self._imap_user() and self._imap_password() and self._cfg("imap_host"):
+            self._watch_task = asyncio.create_task(self._watch_loop())
+
+    async def on_unload(self) -> None:
+        if self._watch_task is not None:
+            self._watch_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._watch_task
+            self._watch_task = None
 
     # ── helpers ──────────────────────────────────────────────────────────
 
@@ -189,6 +213,39 @@ class EmailManagerApplet(AppletBase):
                     "required": ["uid", "destination"],
                 },
                 applet_name=self.name,
+            ),
+        ]
+
+    def get_trigger_definitions(self) -> list[TriggerDefinition]:
+        return [
+            TriggerDefinition(
+                name="new_email",
+                description="Emitted when a new unseen email is detected during background inbox monitoring.",
+                applet_name=self.name,
+                payload_schema={
+                    "type": "object",
+                    "properties": {
+                        "uid": {"type": "string"},
+                        "subject": {"type": "string"},
+                        "from": {"type": "string"},
+                        "snippet": {"type": "string"},
+                    },
+                },
+            ),
+            TriggerDefinition(
+                name="urgent_email_detected",
+                description="Emitted when a newly seen email matches configured urgency keywords.",
+                applet_name=self.name,
+                payload_schema={
+                    "type": "object",
+                    "properties": {
+                        "uid": {"type": "string"},
+                        "subject": {"type": "string"},
+                        "from": {"type": "string"},
+                        "snippet": {"type": "string"},
+                        "urgency_reason": {"type": "string"},
+                    },
+                },
             ),
         ]
 
@@ -359,3 +416,74 @@ class EmailManagerApplet(AppletBase):
                 conn.logout()
 
         return await asyncio.to_thread(_work)
+
+    async def _watch_loop(self) -> None:
+        poll_seconds = max(15, int(self._cfg("proactive_poll_seconds", 120)))
+        while True:
+            try:
+                await self._poll_for_proactive_signals()
+            except Exception:
+                self.logger.exception("Email proactive watch poll failed")
+            await asyncio.sleep(poll_seconds)
+
+    async def _poll_for_proactive_signals(self) -> None:
+        mailbox = str(self._cfg("default_mailbox", "INBOX"))
+        limit = int(self._cfg("proactive_max_fetch", 10))
+        known_uids = self._load_seen_uids()
+        emails = await self._fetch_emails({"mailbox": mailbox, "limit": limit, "unseen_only": True})
+        updated = False
+
+        for item in reversed(emails):
+            uid = str(item.get("uid", ""))
+            if not uid or uid in known_uids:
+                continue
+            payload = {
+                "uid": uid,
+                "mailbox": mailbox,
+                "from": str(item.get("from", "")),
+                "to": str(item.get("to", "")),
+                "subject": str(item.get("subject", "")),
+                "date": str(item.get("date", "")),
+                "snippet": str(item.get("snippet", "")),
+            }
+            await self.emit_trigger("new_email", payload)
+            urgency_reason = self._detect_urgency(payload)
+            if urgency_reason:
+                await self.emit_trigger("urgent_email_detected", {**payload, "urgency_reason": urgency_reason})
+            known_uids.add(uid)
+            updated = True
+
+        if updated:
+            self._save_seen_uids(known_uids)
+
+    def _detect_urgency(self, payload: dict[str, str]) -> str | None:
+        haystack = " ".join([payload.get("subject", ""), payload.get("snippet", "")]).lower()
+        for keyword in self._urgent_keywords():
+            if keyword in haystack:
+                return keyword
+        return None
+
+    def _urgent_keywords(self) -> list[str]:
+        raw = str(self._cfg("urgent_keywords", "urgent,asap,immediately,action required,important"))
+        return [item.strip().lower() for item in raw.split(",") if item.strip()]
+
+    def _state_path(self) -> Path:
+        state_dir = DATA_DIR / "applet_state"
+        state_dir.mkdir(exist_ok=True)
+        return state_dir / "email_manager_seen_uids.json"
+
+    def _load_seen_uids(self) -> set[str]:
+        path = self._state_path()
+        if not path.exists():
+            return set()
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return set()
+        if not isinstance(raw, list):
+            return set()
+        return {str(item) for item in raw[-500:]}
+
+    def _save_seen_uids(self, uids: set[str]) -> None:
+        trimmed = sorted(uids)[-500:]
+        self._state_path().write_text(json.dumps(trimmed, indent=2), encoding="utf-8")

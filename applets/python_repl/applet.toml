@@ -1,0 +1,7 @@
+[applet.python_repl]
+description = "Sandboxed Python REPL for ad-hoc data analysis with captured output, generated artifacts, pandas, and matplotlib."
+allow_execution = false
+timeout_seconds = 30
+max_code_chars = 12000
+max_output_chars = 16000
+retain_run_artifacts = 25

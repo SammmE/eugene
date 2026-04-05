@@ -8,5 +8,9 @@ smtp_port = 587
 smtp_use_tls = true
 max_fetch = 20
 default_mailbox = "INBOX"
-# imap_user and imap_password are secrets — set via EMAIL_MANAGER_IMAP_USER / EMAIL_MANAGER_IMAP_PASSWORD in .env
-# smtp_user and smtp_password are secrets — set via EMAIL_MANAGER_SMTP_USER / EMAIL_MANAGER_SMTP_PASSWORD in .env
+proactive_enabled = true
+proactive_poll_seconds = 120
+proactive_max_fetch = 10
+urgent_keywords = "urgent,asap,immediately,action required,important"
+# imap_user and imap_password are secrets - set via EMAIL_MANAGER_IMAP_USER / EMAIL_MANAGER_IMAP_PASSWORD in .env
+# smtp_user and smtp_password are secrets - set via EMAIL_MANAGER_SMTP_USER / EMAIL_MANAGER_SMTP_PASSWORD in .env

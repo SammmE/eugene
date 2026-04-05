@@ -1,6 +1,6 @@
 # AppletBase Reference
 
-Applets subclass `eugene.core.AppletBase`. They provide tools, inject context, intercept messages, and expose REST routes.
+Applets subclass `eugene.core.AppletBase`. They provide tools, proactive trigger sources, context injection, scheduled jobs, event handlers, and REST routes.
 
 ## Class Attributes & Config
 
@@ -90,6 +90,46 @@ Two runtime-injected keys are always present in `arguments`:
 - `_runtime_session_id` — active session ID
 - `_runtime_source_channel` — originating channel name
 
+## Trigger Sources
+
+Use trigger sources when the applet should emit compact, structured conditions that Eugene can turn into proactive actions later.
+
+```python
+from eugene.models import TriggerDefinition
+
+def get_trigger_definitions(self) -> list[TriggerDefinition]:
+    return [
+        TriggerDefinition(
+            name="important_event",
+            description="Emitted when the applet detects a notable event.",
+            applet_name=self.name,
+            payload_schema={
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "severity": {"type": "string"},
+                },
+            },
+        )
+    ]
+
+async def emit_something(self) -> None:
+    await self.emit_trigger(
+        "important_event",
+        {
+            "summary": "Something happened",
+            "severity": "high",
+        },
+    )
+```
+
+Guidelines:
+
+- Emit narrow named signals instead of large generic payloads.
+- Keep payloads small and structured so matching stays cheap.
+- Dedupe, batch, or throttle noisy upstream activity before calling `emit_trigger()`.
+- Treat these as event sources, not tool replacements. Tools do work; sources announce conditions.
+
 ## Context Injection
 
 ```python
@@ -135,6 +175,7 @@ def get_routes(self) -> list[tuple[str, APIRouter]]:
 | `self.services.memory` | Working memory — `search_memory`, `store_exchange` |
 | `self.services.channels` | Deliver messages to web/Discord/Telegram |
 | `self.services.scheduler` | Register/delete `ScheduledTask` objects |
+| `self.services.proactive` | Register/match proactive triggers emitted from applet sources |
 | `self.services.applets` | Applet registry and instance access |
 | `self.services.config` | Global `EugeneConfig` |
 | `self.services.provider` | Call LLM directly |

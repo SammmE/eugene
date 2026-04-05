@@ -42,7 +42,7 @@ Eugene processes more than just text:
 
 ## 🛠️ Built-in Capabilities (Applets)
 
-Eugene ships with **12 primary applets** out of the box:
+Eugene ships with **13 primary applets** out of the box:
 
 1. **`user_prompt`**: 🆕 Interactive questionnaires. Triggers step-by-step modals in the Web UI or formatted text prompts in Discord/Telegram.
 2. **`personality`**: Manages Eugene's identity, tone, and behavior via a hot-reloaded `personality.toml`.
@@ -56,6 +56,7 @@ Eugene ships with **12 primary applets** out of the box:
 10. **`memory`**: Semantic search across past conversations and fact retrieval.
 11. **`clock`**: Precise time/date and timezone-aware context.
 12. **`pdf_reader`**: specialized extraction of structured data from PDF documents.
+13. **`python_repl`**: Sandboxed Python execution for ad-hoc analysis with captured output, artifact generation, and support for pandas/matplotlib when installed.
 
 ---
 
@@ -112,4 +113,3 @@ uv run uvicorn eugene.main:app --host 127.0.0.1 --port 8000
 Open your browser and navigate to `http://127.0.0.1:8000`. Use the API key configured in `eugene.toml` to log in.
 
 ---
-

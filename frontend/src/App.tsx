@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { type Highlighter, createHighlighter } from 'shiki'
 import './App.css'
 import { apiRequest, createChatSocket, deleteConversationHistory, uploadFile } from './lib/api'
-import type { EugeneApplet, EugeneHealth, EugeneSchedule, EugeneUsage } from './lib/api'
+import type { EugeneApplet, EugeneHealth, EugeneSchedule, EugeneTrigger, EugeneUsage } from './lib/api'
 
 let highlighterPromise: Promise<Highlighter> | null = null
 
@@ -363,6 +363,7 @@ export default function App() {
   const [health, setHealth] = useState<EugeneHealth | null>(null)
   const [applets, setApplets] = useState<EugeneApplet[]>([])
   const [schedules, setSchedules] = useState<EugeneSchedule[]>([])
+  const [triggers, setTriggers] = useState<EugeneTrigger[]>([])
   const [usage, setUsage] = useState<EugeneUsage[]>([])
   const socketRef = useRef<WebSocket | null>(null)
   const activeSessionRef = useRef(activeSessionId)
@@ -566,15 +567,17 @@ export default function App() {
     try {
       setRefreshing(true)
       setError('')
-      const [healthPayload, appletsPayload, schedulesPayload, usagePayload] = await Promise.all([
+      const [healthPayload, appletsPayload, schedulesPayload, triggersPayload, usagePayload] = await Promise.all([
         apiRequest<EugeneHealth>('/api/health', apiKey),
         apiRequest<EugeneApplet[]>('/api/applets', apiKey),
         apiRequest<EugeneSchedule[]>('/api/schedules', apiKey),
+        apiRequest<EugeneTrigger[]>('/api/triggers', apiKey),
         apiRequest<EugeneUsage[]>('/api/token-usage', apiKey),
       ])
       setHealth(healthPayload)
       setApplets(Array.isArray(appletsPayload) ? appletsPayload : [])
       setSchedules(Array.isArray(schedulesPayload) ? schedulesPayload : [])
+      setTriggers(Array.isArray(triggersPayload) ? triggersPayload : [])
       setUsage(Array.isArray(usagePayload) ? usagePayload.slice(0, 12) : [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to refresh Eugene state.')
@@ -1111,6 +1114,30 @@ export default function App() {
                   <span>{icon('clock')}{item.trigger_type}</span>
                 </div>
                 <p>{item.trigger_value}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Automation</p>
+              <h3>Triggers</h3>
+            </div>
+          </div>
+          <div className="compact-list">
+            {triggers.length === 0 ? <p className="empty-copy">No proactive triggers.</p> : null}
+            {triggers.map((item) => (
+              <article key={item.id} className="compact-card">
+                <div className="compact-head">
+                  <strong>{item.name}</strong>
+                  <span className={`status-tag ${item.enabled ? 'enabled' : 'disabled'}`}>
+                    {item.signal_name}
+                  </span>
+                </div>
+                <p>{item.source_applet}</p>
+                <p>{item.last_fired_at ? `Last fired ${formatTimestamp(item.last_fired_at)}` : 'Not fired yet'}</p>
               </article>
             ))}
           </div>

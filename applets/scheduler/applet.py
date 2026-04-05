@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from eugene.core import AppletBase, FieldSpec
-from eugene.models import ScheduledTask, ToolDefinition
+from eugene.models import ProactiveTrigger, ScheduledTask, ToolDefinition
 
 
 class SchedulerApplet(AppletBase):
@@ -21,6 +21,7 @@ class SchedulerApplet(AppletBase):
     def get_tools(self) -> list[ToolDefinition]:
         return [
             ToolDefinition(name="list_scheduled_tasks", description="List all scheduled tasks.", applet_name=self.name),
+            ToolDefinition(name="list_proactive_triggers", description="List all proactive event-based triggers.", applet_name=self.name),
             ToolDefinition(
                 name="scheduler",
                 description="Legacy alias to create a scheduled task.",
@@ -50,11 +51,50 @@ class SchedulerApplet(AppletBase):
                 input_schema={"type": "object", "properties": {"task_id": {"type": "string"}}},
                 applet_name=self.name,
             ),
+            ToolDefinition(
+                name="create_proactive_trigger",
+                description=(
+                    "Create an event-based proactive trigger after the user explicitly asks for ongoing automation. "
+                    "Use exact trigger emitter names from the trigger catalog and keep filters minimal for efficiency."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                        "source_applet": {"type": "string"},
+                        "signal_name": {"type": "string"},
+                        "prompt": {"type": "string", "description": "What Eugene should do when the trigger fires."},
+                        "match_required": {
+                            "type": "object",
+                            "description": "Exact key/value filters that must match the emitted payload.",
+                            "additionalProperties": {"type": ["string", "number", "boolean"]},
+                        },
+                        "match_contains": {
+                            "type": "object",
+                            "description": "Case-insensitive substring filters keyed by payload field.",
+                            "additionalProperties": {"type": "string"},
+                        },
+                        "cooldown_seconds": {"type": "integer"},
+                        "origin_channel": {"type": "string"},
+                    },
+                    "required": ["name", "source_applet", "signal_name", "prompt"],
+                },
+                applet_name=self.name,
+            ),
+            ToolDefinition(
+                name="delete_proactive_trigger",
+                description="Delete a proactive trigger by id.",
+                input_schema={"type": "object", "properties": {"trigger_id": {"type": "string"}}, "required": ["trigger_id"]},
+                applet_name=self.name,
+            ),
         ]
 
     async def handle_tool(self, name: str, arguments: dict) -> str | list[dict]:
         if name == "list_scheduled_tasks":
             return [task.model_dump() for task in self.services.scheduler.tasks.values()]
+        if name == "list_proactive_triggers":
+            return [trigger.model_dump(mode="json") for trigger in self.services.proactive.triggers.values()]
 
         if name in {"create_scheduled_task", "scheduler"}:
             if name == "scheduler":
@@ -100,4 +140,40 @@ class SchedulerApplet(AppletBase):
         if name == "delete_scheduled_task":
             await self.services.scheduler.delete(arguments["task_id"])
             return "Scheduled task deleted."
+        if name == "create_proactive_trigger":
+            source_applet = str(arguments["source_applet"])
+            signal_name = str(arguments["signal_name"])
+            applet_record = self.services.applets.registry.get(source_applet)
+            if applet_record is None or not applet_record.enabled:
+                raise ValueError(f"Unknown or disabled source applet: {source_applet}")
+            source_instance = await self.services.applets.load_applet(source_applet)
+            available_signals = {definition.name for definition in source_instance.get_trigger_definitions()}
+            if signal_name not in available_signals:
+                raise ValueError(f"Signal '{signal_name}' is not exposed by applet '{source_applet}'")
+
+            runtime_session_id = arguments.get("_runtime_session_id")
+            runtime_source_channel = arguments.get("_runtime_source_channel")
+            trigger = ProactiveTrigger(
+                id=str(uuid4()),
+                name=str(arguments["name"]),
+                description=str(arguments.get("description") or ""),
+                source_applet=source_applet,
+                signal_name=signal_name,
+                prompt=str(arguments["prompt"]),
+                origin_channel=str(arguments.get("origin_channel") or runtime_source_channel or self.config["primary_channel"]),
+                session_id=runtime_session_id,
+                match_required=dict(arguments.get("match_required") or {}),
+                match_contains=dict(arguments.get("match_contains") or {}),
+                cooldown_seconds=int(arguments.get("cooldown_seconds") or 0),
+                metadata={
+                    "source_tool": name,
+                    "runtime_session_id": runtime_session_id,
+                    "runtime_source_channel": runtime_source_channel,
+                },
+            )
+            await self.services.proactive.register(trigger)
+            return f"Proactive trigger created: {trigger.id}"
+        if name == "delete_proactive_trigger":
+            await self.services.proactive.delete(str(arguments["trigger_id"]))
+            return "Proactive trigger deleted."
         raise ValueError(name)

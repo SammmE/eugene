@@ -1,11 +1,17 @@
 ---
 name: eugene-applets
-description: Create, modify, and integrate native Eugene Applets to add capabilities, tools, background jobs, and context injections securely. Use when the user asks to "create an applet", "build an integration for Eugene", "add a native tool", "add a scheduled job in Eugene", or when native Python execution is preferred over an external MCP server.
+description: Create, modify, and integrate native Eugene Applets to add capabilities, tools, trigger sources, background jobs, and context injections securely. Use when the user asks to "create an applet", "build an integration for Eugene", "add a native tool", "add a trigger source in Eugene", "add a scheduled job in Eugene", or when native Python execution is preferred over an external MCP server.
 ---
 
 # Eugene Applet Development
 
 Applets are native Python plugins that run inside Eugene's process. They are the most powerful extension point.
+
+They can now expose three main automation surfaces:
+
+- `get_tools()` for user- or LLM-invoked actions
+- `get_trigger_definitions()` for proactive event sources that other automation can subscribe to
+- `get_scheduled_tasks()` for time-based automation
 
 ## Applets vs. MCP
 
@@ -17,7 +23,11 @@ Applets are native Python plugins that run inside Eugene's process. They are the
 1. Create `applets/<applet_name>/applet.py` and `applets/<applet_name>/applet.toml`
 2. Subclass `AppletBase` from `eugene.core`
 3. Declare all config fields in the inner `Config` class using `FieldSpec`
-4. Restart the Eugene server — applets are discovered at startup
+4. Add the relevant extension points for the applet:
+   - `get_tools()` for callable tools
+   - `get_trigger_definitions()` and `emit_trigger()` when the applet should emit proactive sources
+   - `get_scheduled_tasks()` for time-based jobs
+5. Restart the Eugene server — applets are discovered at startup
 
 **Full API reference**: [applet-reference.md](references/applet-reference.md)  
 **Boilerplate to start from**: [applet.py template](assets/applet-template/applet.py)
@@ -51,5 +61,9 @@ The TOML key must match the directory name exactly.
 
 1. Use the [template](assets/applet-template/applet.py) as a starting point
 2. Declare secrets in `.env` using the `APPLET_NAME_FIELD` convention
-3. Restart Eugene to load (`uvicorn eugene.main:app --reload` or kill/restart)
-4. Test via the web UI or by asking Eugene to use the tool
+3. If the applet emits proactive sources, keep them cheap:
+   - emit narrow named signals
+   - send compact payloads
+   - dedupe or throttle noisy upstream events before calling `emit_trigger()`
+4. Restart Eugene to load (`uvicorn eugene.main:app --reload` or kill/restart)
+5. Test via the web UI or by asking Eugene to use the tool
