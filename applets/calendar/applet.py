@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any
 import datetime
+import uuid
 from eugene.core import AppletBase, FieldSpec
 from eugene.models import ToolDefinition
 import caldav
@@ -18,6 +19,10 @@ class CalendarApplet(AppletBase):
             "caldav_url": FieldSpec(default="", description="CalDAV Server URL"),
             "caldav_user": FieldSpec(default="", description="CalDAV Username"),
             "caldav_password": FieldSpec(default="", description="CalDAV Password"),
+            "preferred_calendar_name": FieldSpec(
+                default="",
+                description="Optional calendar name to use instead of the first returned calendar.",
+            ),
         }
 
     async def on_load(self) -> None:
@@ -30,6 +35,40 @@ class CalendarApplet(AppletBase):
         if not url or not user or not password:
             raise ValueError("CalDAV credentials are not fully configured.")
         return caldav.DAVClient(url=url, username=user, password=password)
+
+    def _get_principal(self, client: Any) -> Any:
+        principal = client.principal
+        return principal() if callable(principal) else principal
+
+    def _get_calendars(self, principal: Any) -> list[Any]:
+        getter = getattr(principal, "get_calendars", None)
+        if callable(getter):
+            return list(getter())
+
+        fallback = getattr(principal, "calendars", None)
+        if callable(fallback):
+            return list(fallback())
+
+        raise RuntimeError("CalDAV principal does not expose get_calendars().")
+
+    def _pick_calendar(self, calendars: list[Any]) -> Any:
+        preferred = str(self.config.get("preferred_calendar_name", "") or "").strip().lower()
+        if preferred:
+            for calendar in calendars:
+                if str(getattr(calendar, "name", "") or "").strip().lower() == preferred:
+                    return calendar
+        return calendars[0]
+
+    def _format_calendar_error(self, exc: Exception) -> str:
+        message = str(exc).strip() or exc.__class__.__name__
+        lowered = message.lower()
+        if "401" in lowered or "unauthor" in lowered or "forbidden" in lowered:
+            return (
+                "Calendar connection was rejected by the server. Recheck the CalDAV URL, username, "
+                "and password. For Google Calendar, use https://apidata.googleusercontent.com/caldav/v2/ "
+                "and a Google App Password, not your normal account password."
+            )
+        return f"Error accessing calendar: {message}"
 
     def get_tools(self) -> list[ToolDefinition]:
         return [
@@ -71,11 +110,11 @@ class CalendarApplet(AppletBase):
             days = arguments.get("days", 7)
             try:
                 client = self._get_client()
-                principal = client.principal()
-                calendars = principal.calendars()
+                principal = self._get_principal(client)
+                calendars = self._get_calendars(principal)
                 if not calendars:
                     return "No calendars found."
-                calendar = calendars[0]  # Use first calendar
+                calendar = self._pick_calendar(calendars)
 
                 start_date = datetime.datetime.now()
                 end_date = start_date + datetime.timedelta(days=days)
@@ -97,7 +136,7 @@ class CalendarApplet(AppletBase):
             except ValueError as ve:
                 return str(ve)
             except Exception as e:
-                return f"Error accessing calendar: {e}"
+                return self._format_calendar_error(e)
 
         elif name == "add_event":
             title = arguments.get("title")
@@ -109,23 +148,26 @@ class CalendarApplet(AppletBase):
 
             try:
                 client = self._get_client()
-                principal = client.principal()
-                calendars = principal.calendars()
+                principal = self._get_principal(client)
+                calendars = self._get_calendars(principal)
                 if not calendars:
                     return "No calendars found."
-                calendar = calendars[0]
+                calendar = self._pick_calendar(calendars)
 
                 # Basic vCalendar event creation
                 now_str = datetime.datetime.now(datetime.timezone.utc).strftime(
                     "%Y%m%dT%H%M%SZ"
                 )
-                start_str = start_time.strftime("%Y%m%dT%H%M%SZ")
+                if start_time.tzinfo is None:
+                    start_time = start_time.astimezone()
+                start_utc = start_time.astimezone(datetime.timezone.utc)
+                start_str = start_utc.strftime("%Y%m%dT%H%M%SZ")
 
                 vcal = f"""BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Eugene//Calendar Applet//EN
 BEGIN:VEVENT
-UID:{datetime.datetime.now().timestamp()}
+UID:{uuid.uuid4()}
 DTSTAMP:{now_str}
 DTSTART:{start_str}
 SUMMARY:{title}
@@ -136,6 +178,6 @@ END:VCALENDAR"""
             except ValueError as ve:
                 return str(ve)
             except Exception as e:
-                return f"Error adding event: {e}"
+                return self._format_calendar_error(e)
 
         raise ValueError(f"Unknown tool: {name}")
