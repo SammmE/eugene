@@ -9,6 +9,7 @@ src/eugene/logging_utils.py
 src/eugene/main.py
 src/eugene/models.py
 src/eugene/services.py
+src/eugene/termagotchi_client.py
 src/eugene.egg-info/PKG-INFO
 src/eugene.egg-info/SOURCES.txt
 src/eugene.egg-info/dependency_links.txt

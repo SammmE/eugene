@@ -13,6 +13,7 @@ Eugene is built to be **extensible**, **modular**, and **resilient**, with a foc
 Interact with Eugene from anywhere:
 
 - **Web Dashboard**: A premium React-based interface with real-time WebSocket communication and operational inspector panels.
+- **Termagotchi Client**: A separate terminal pet app that talks to Eugene over WebSockets, so the server console can keep clean logs.
 - **Discord**: Full integration using `discord.py` for rich messaging and channel-based interactions.
 - **Telegram**: Fast, reliable communication via the `python-telegram-bot` API.
 
@@ -107,6 +108,15 @@ uv sync
 # Start the server (includes auto-discovering applets and channels)
 uv run uvicorn eugene.main:app --host 127.0.0.1 --port 8000
 ```
+
+In a separate terminal, run the pet client:
+
+```bash
+uv run eugene-termagotchi --api-key YOUR_API_KEY
+```
+
+The termagotchi app connects to Eugene over the existing WebSocket interface, so the pet UI stays isolated from FastAPI/Uvicorn logs. Normal text chats with Eugene; `/feed`, `/play`, `/sleep`, `/name`, `/help`, and `/quit` are local pet commands.
+It now uses `rich` for a full-screen terminal layout and markdown-rendered Eugene replies.
 
 ### UI Access
 

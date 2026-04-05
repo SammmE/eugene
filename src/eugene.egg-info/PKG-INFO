@@ -36,4 +36,6 @@ Requires-Dist: duckduckgo-search>=8.1.1
 Requires-Dist: beautifulsoup4>=4.14.3
 Requires-Dist: caldav>=3.1.0
 Requires-Dist: requests>=2.32.5
+Requires-Dist: rich>=13.9.4
 Requires-Dist: schoolopy>=0.3.1
+Requires-Dist: websockets>=15.0.1

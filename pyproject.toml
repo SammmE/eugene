@@ -37,11 +37,14 @@ dependencies = [
   "beautifulsoup4>=4.14.3",
   "caldav>=3.1.0",
   "requests>=2.32.5",
+  "rich>=13.9.4",
   "schoolopy>=0.3.1",
+  "websockets>=15.0.1",
 ]
 
 [project.scripts]
 eugene = "eugene.__main__:main"
+eugene-termagotchi = "eugene.termagotchi_client:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

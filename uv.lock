@@ -893,6 +893,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "python-telegram-bot" },
     { name = "requests" },
+    { name = "rich" },
     { name = "schoolopy" },
     { name = "sentence-transformers" },
     { name = "sqlite-utils" },
@@ -901,6 +902,7 @@ dependencies = [
     { name = "tomli-w" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "watchfiles" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -931,6 +933,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "python-telegram-bot", specifier = ">=21.10" },
     { name = "requests", specifier = ">=2.32.5" },
+    { name = "rich", specifier = ">=13.9.4" },
     { name = "schoolopy", specifier = ">=0.3.1" },
     { name = "sentence-transformers", specifier = ">=3.4.0" },
     { name = "sqlite-utils", specifier = ">=3.38" },
@@ -939,6 +942,7 @@ requires-dist = [
     { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
     { name = "watchfiles", specifier = ">=1.0.4" },
+    { name = "websockets", specifier = ">=15.0.1" },
 ]
 
 [[package]]
