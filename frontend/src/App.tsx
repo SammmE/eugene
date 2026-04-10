@@ -121,7 +121,7 @@ function UserPromptModal({ prompt: activePrompt, apiKey, onDone }: {
     setSubmitting(true)
     setError('')
     try {
-      const res = await fetch('/applets/user_prompt/respond', {
+      const res = await fetch('/applets/questions/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
         body: JSON.stringify({ request_id: requestId, answers }),
@@ -164,7 +164,7 @@ function UserPromptModal({ prompt: activePrompt, apiKey, onDone }: {
               <input
                 type="text"
                 className="prompt-custom-input"
-                placeholder="Custom answer…"
+                placeholder="Enter a custom answer"
                 value={currentAnswer === '' || question.choices.includes(currentAnswer) ? '' : currentAnswer}
                 onChange={onCustomChange}
               />
@@ -606,7 +606,7 @@ export default function App() {
       const payload = JSON.parse(event.data) as any
       const eventType = payload.type ?? 'message.response'
 
-      if (eventType === 'user_prompt.request') {
+      if (eventType === 'questions.request') {
         setActivePrompt({
           requestId: payload.request_id as string,
           questions: payload.questions as PromptQuestion[],

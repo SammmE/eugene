@@ -26,8 +26,8 @@ class PromptResponse(BaseModel):
     answers: list[str]
 
 
-class UserPromptApplet(AppletBase):
-    name = "user_prompt"
+class QuestionsApplet(AppletBase):
+    name = "questions"
     description = (
         "Prompt the user for answers to one or more questions. "
         "On web, shows an interactive step-by-step modal dialog with optional multiple-choice. "
@@ -45,7 +45,7 @@ class UserPromptApplet(AppletBase):
         self._pending = {}
 
     async def on_load(self) -> None:
-        self.logger.info("UserPrompt applet loaded")
+        self.logger.info("Questions applet loaded")
 
     # ── Tools ─────────────────────────────────────────────────────────────────
 
@@ -121,7 +121,7 @@ class UserPromptApplet(AppletBase):
             return "No active web session found; cannot prompt the user."
 
         payload = {
-            "type": "user_prompt.request",
+            "type": "questions.request",
             "request_id": request_id,
             "questions": [
                 {"text": q.text, "choices": q.choices or []}
