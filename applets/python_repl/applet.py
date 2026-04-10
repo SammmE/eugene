@@ -40,7 +40,8 @@ class PythonReplApplet(AppletBase):
                 name="execute_python",
                 description=(
                     "Execute Python code in an isolated data-analysis environment. "
-                    "Captures stdout, stderr, the last expression result, generated files, and matplotlib figures."
+                    "Captures stdout, stderr, the last expression result, generated files, and matplotlib figures. "
+                    "The runtime exposes ARTIFACT_DIR and ARTIFACT_PATH for writing files that should be returned as artifacts."
                 ),
                 input_schema={
                     "type": "object",
@@ -144,6 +145,17 @@ class PythonReplApplet(AppletBase):
         result["run_id"] = run_id
         result["workspace_dir"] = str(workspace_dir)
         result["artifacts"] = [self._artifact_payload(Path(item["path"])) for item in result.get("artifacts", [])]
+        if result["artifacts"]:
+            first = result["artifacts"][0]
+            result["primary_image_url"] = first["url"]
+            result["primary_image_markdown"] = f"![Generated Python artifact]({first['url']})"
+        index_payload = self._write_artifact_index(
+            session_id=session_id,
+            run_id=run_id,
+            artifacts=result["artifacts"],
+        )
+        if index_payload:
+            result["artifact_index"] = index_payload
         self._prune_old_runs(session_id)
         return result
 
@@ -163,8 +175,63 @@ class PythonReplApplet(AppletBase):
             "path": str(path),
             "url": f"/{relative}",
             "name": path.name,
+            "media_type": self._guess_media_type(path),
             "size_bytes": path.stat().st_size,
         }
+
+    def _write_artifact_index(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        artifacts: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        run_static = self._static_root() / session_id / run_id
+        run_static.mkdir(parents=True, exist_ok=True)
+        if not artifacts:
+            return None
+
+        payload = {
+            "session_id": session_id,
+            "run_id": run_id,
+            "artifact_count": len(artifacts),
+            "primary_image_url": artifacts[0]["url"],
+            "primary_image_markdown": f"![Generated Python artifact]({artifacts[0]['url']})",
+            "artifacts": artifacts,
+        }
+        index_path = run_static / "artifact_index.json"
+        index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        session_latest = self._static_root() / session_id
+        session_latest.mkdir(parents=True, exist_ok=True)
+        latest_index_path = session_latest / "latest_artifact_index.json"
+        latest_index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        primary_path = Path(artifacts[0]["path"])
+        if primary_path.exists() and primary_path.is_file():
+            latest_image = session_latest / f"latest{primary_path.suffix.lower()}"
+            shutil.copy2(primary_path, latest_image)
+
+        run_index_payload = self._artifact_payload(index_path)
+        latest_index_payload = self._artifact_payload(latest_index_path)
+        return {
+            "run": run_index_payload,
+            "latest": latest_index_payload,
+        }
+
+    def _guess_media_type(self, path: Path) -> str:
+        extension = path.suffix.lower()
+        return {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".svg": "image/svg+xml",
+            ".json": "application/json",
+            ".txt": "text/plain",
+            ".md": "text/markdown",
+        }.get(extension, "application/octet-stream")
 
     def _clear_session_workspace(self, session_id: str) -> None:
         session_workspace = self._workspace_root() / session_id

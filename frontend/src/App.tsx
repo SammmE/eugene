@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import { type Highlighter, createHighlighter } from 'shiki'
 import './App.css'
 import { apiRequest, createChatSocket, deleteConversationHistory, uploadFile } from './lib/api'
@@ -937,7 +940,8 @@ export default function App() {
                 {item.role === 'assistant' ? (
                   <div className="message-text markdown-body">
                     <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
+                      remarkPlugins={[remarkGfm, remarkMath]}
+                      rehypePlugins={[rehypeKatex]}
                       components={{
                         code({ className, children, ...props }) {
                           const match = /language-(\w+)/.exec(className || '')

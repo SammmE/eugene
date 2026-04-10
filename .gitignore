@@ -48,6 +48,19 @@ static/assets/
 static/index.html
 static/favicon.svg
 
+# [Applet Artifacts]
+# Generated image and artifact outputs from runtime applets.
+static/matplotlib/
+static/python_repl/
+
+# [Local Agent/Tooling Workspace]
+# Local generated skills/workspace content; not part of source.
+.codex/
+.agents/
+
+# [Local Scratch Files]
+manual_plot.png
+
 # [Environmental Secrets]
 # NEVER commit .env files containing API keys or passwords.
 .env

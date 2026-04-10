@@ -1,0 +1,6 @@
+[applet.yfinance]
+description = "Fetch Yahoo Finance market data, price history, and company metadata."
+default_history_period = "1mo"
+default_history_interval = "1d"
+default_news_count = 5
+summary_max_chars = 1200

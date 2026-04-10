@@ -18,8 +18,11 @@ Eugene can act as a general assistant with attached tools for:
 - scheduled and proactive tasks
 - web search and page fetching
 - PDF attachment extraction
+- matplotlib chart generation from natural-language instructions
+- financial market and company data via Yahoo Finance
 - shell command execution when explicitly enabled
 - sandboxed Python analysis when explicitly enabled
+- guided follow-up questions through web modal or chat prompts
 - email, calendar, weather, and Schoology integrations
 
 At runtime, Eugene loads applets from `applets/`, channels from `channels/`, checks provider configuration, starts the event bus, mounts API routes, serves the frontend, and begins accepting messages over WebSockets and external channels.
@@ -62,6 +65,7 @@ The primary channel is configured in `eugene.toml`, and individual channel enabl
 The repository currently ships with these applets:
 
 - `user_prompt`: asks users follow-up questions; uses a modal flow on web and plain text prompts on chat channels
+- `questions`: prompts users for one or more answers; web uses an interactive modal and Discord/Telegram use plain text prompts
 - `personality`: reads and updates Eugene's personality configuration
 - `email_manager`: IMAP/SMTP email fetch, read, send, draft, move, and proactive polling
 - `calendar`: CalDAV calendar listing and event creation
@@ -73,7 +77,9 @@ The repository currently ships with these applets:
 - `memory`: always-on working memory and long-term retrieval
 - `clock`: timezone-aware time/date context
 - `pdf_reader`: extracts text from PDF attachments before prompt assembly
-- `python_repl`: sandboxed Python analysis with output capture and artifact retention, disabled by default
+- `python_repl`: sandboxed Python analysis with captured stdout/stderr, pandas-aware result summaries, generated-file tracking, and matplotlib artifact rendering
+- `matplotlib`: natural-language chart generation that produces rendered image artifacts and markdown-ready image URLs
+- `yfinance`: Yahoo Finance market data, ticker metadata, and historical price lookups with configurable defaults
 - `schoology`: Schoology feed and event access
 
 ## Requirements

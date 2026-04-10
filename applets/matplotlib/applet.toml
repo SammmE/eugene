@@ -1,0 +1,10 @@
+[applet.matplotlib]
+description = "Generate matplotlib charts from natural-language instructions and return rendered images."
+allow_execution = true
+timeout_seconds = 30
+max_instruction_chars = 8000
+max_data_chars = 30000
+max_generated_code_chars = 12000
+max_output_chars = 12000
+retain_run_artifacts = 25
+generation_model = ""

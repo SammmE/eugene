@@ -19,9 +19,27 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from eugene.config import APPLETS_DIR, CHANNELS_DIR, DATA_DIR, ROOT_DIR, load_toml
-from eugene.core import AppletBase, ChannelBase, ServiceContainer, WorkingMemory, discover_subclass
+from eugene.core import (
+    AppletBase,
+    ChannelBase,
+    ServiceContainer,
+    WorkingMemory,
+    discover_subclass,
+)
 from eugene.logging_utils import preview
-from eugene.models import AppletRecord, Attachment, ChannelStatus, LLMResult, Message, ProactiveTrigger, ProviderCheckResult, ScheduledTask, ToolCall, ToolDefinition, TriggerKind
+from eugene.models import (
+    AppletRecord,
+    Attachment,
+    ChannelStatus,
+    LLMResult,
+    Message,
+    ProactiveTrigger,
+    ProviderCheckResult,
+    ScheduledTask,
+    ToolCall,
+    ToolDefinition,
+    TriggerKind,
+)
 
 try:
     import magic  # type: ignore
@@ -116,7 +134,9 @@ class PromptCompressionService:
             logger.bind(component="compression").info("Prompt compression disabled")
             return
         if PromptCompressor is None:
-            logger.bind(component="compression").warning("Prompt compression requested but llmlingua is not installed")
+            logger.bind(component="compression").warning(
+                "Prompt compression requested but llmlingua is not installed"
+            )
             return
         try:
             self._compressor = PromptCompressor(
@@ -131,10 +151,14 @@ class PromptCompressionService:
                 min_chars=self.services.config.compress_prompt_min_chars,
             )
         except Exception:
-            logger.bind(component="compression").exception("Failed to initialize LLMLingua-2 compressor")
+            logger.bind(component="compression").exception(
+                "Failed to initialize LLMLingua-2 compressor"
+            )
             self.available = False
 
-    def compress_messages(self, messages: list[dict[str, Any]], *, origin: str, model: str) -> list[dict[str, Any]]:
+    def compress_messages(
+        self, messages: list[dict[str, Any]], *, origin: str, model: str
+    ) -> list[dict[str, Any]]:
         if not self.enabled or not self.available or self._compressor is None:
             return messages
 
@@ -152,7 +176,10 @@ class PromptCompressionService:
             original_chars += len(content)
 
             # Keep system instructions untouched for stability.
-            if role == "system" or len(content) < self.services.config.compress_prompt_min_chars:
+            if (
+                role == "system"
+                or len(content) < self.services.config.compress_prompt_min_chars
+            ):
                 compressed_messages.append(message)
                 compressed_chars += len(content)
                 continue
@@ -163,7 +190,11 @@ class PromptCompressionService:
                     rate=self.services.config.compress_prompt_rate,
                     force_tokens=["\n", "?"],
                 )
-                candidate = result.get("compressed_prompt") if isinstance(result, dict) else None
+                candidate = (
+                    result.get("compressed_prompt")
+                    if isinstance(result, dict)
+                    else None
+                )
                 if isinstance(candidate, str) and candidate.strip():
                     updated = dict(message)
                     updated["content"] = candidate
@@ -173,7 +204,9 @@ class PromptCompressionService:
                     compressed_messages.append(message)
                     compressed_chars += len(content)
             except Exception as exc:
-                logger.bind(component="compression", origin=origin, model=model).warning(
+                logger.bind(
+                    component="compression", origin=origin, model=model
+                ).warning(
                     "Compression failed for one message; using original content error={error}",
                     error=preview(exc),
                 )
@@ -205,21 +238,34 @@ class FrontendReloadService:
 
     async def start(self) -> None:
         if not self.enabled:
-            logger.bind(component="frontend_reload").info("Frontend auto-reload disabled")
+            logger.bind(component="frontend_reload").info(
+                "Frontend auto-reload disabled"
+            )
             return
         if awatch is None:
-            logger.bind(component="frontend_reload").warning("watchfiles unavailable; frontend auto-reload disabled")
+            logger.bind(component="frontend_reload").warning(
+                "watchfiles unavailable; frontend auto-reload disabled"
+            )
             return
-        if not self.frontend_dir.exists() or not (self.frontend_dir / "package.json").exists():
-            logger.bind(component="frontend_reload").warning("frontend directory/package.json not found; auto-reload disabled")
+        if (
+            not self.frontend_dir.exists()
+            or not (self.frontend_dir / "package.json").exists()
+        ):
+            logger.bind(component="frontend_reload").warning(
+                "frontend directory/package.json not found; auto-reload disabled"
+            )
             return
         self._watch_task = asyncio.create_task(self._watch())
         static_index = self.frontend_dir.parent / "static" / "index.html"
         if not static_index.exists():
-            logger.bind(component="frontend_reload").info("Static files missing; dispatching initial build")
+            logger.bind(component="frontend_reload").info(
+                "Static files missing; dispatching initial build"
+            )
             self._initial_build_task = asyncio.create_task(self._rebuild_and_notify())
-            
-        logger.bind(component="frontend_reload").info("Frontend auto-reload watcher started")
+
+        logger.bind(component="frontend_reload").info(
+            "Frontend auto-reload watcher started"
+        )
 
     async def stop(self) -> None:
         if self._watch_task:
@@ -228,7 +274,9 @@ class FrontendReloadService:
                 await self._watch_task
             self._watch_task = None
         self._clients.clear()
-        logger.bind(component="frontend_reload").info("Frontend auto-reload watcher stopped")
+        logger.bind(component="frontend_reload").info(
+            "Frontend auto-reload watcher stopped"
+        )
 
     def register_client(self, websocket: Any) -> None:
         self._clients.add(websocket)
@@ -255,13 +303,18 @@ class FrontendReloadService:
     def _has_relevant_change(self, changes: set[tuple[Any, str]]) -> bool:
         for _, changed in changes:
             path = changed.lower()
-            if any(path.endswith(ext) for ext in (".tsx", ".ts", ".jsx", ".js", ".css", ".html", ".json")):
+            if any(
+                path.endswith(ext)
+                for ext in (".tsx", ".ts", ".jsx", ".js", ".css", ".html", ".json")
+            ):
                 return True
         return False
 
     async def _rebuild_and_notify(self) -> None:
         async with self._build_lock:
-            logger.bind(component="frontend_reload").info("Frontend change detected; rebuilding static assets")
+            logger.bind(component="frontend_reload").info(
+                "Frontend change detected; rebuilding static assets"
+            )
             process = await asyncio.create_subprocess_shell(
                 "npm run build:static",
                 cwd=str(self.frontend_dir),
@@ -273,10 +326,14 @@ class FrontendReloadService:
                 logger.bind(component="frontend_reload").error(
                     "Frontend static rebuild failed code={code} stderr={stderr}",
                     code=process.returncode,
-                    stderr=preview(stderr.decode("utf-8", errors="replace"), max_len=2000),
+                    stderr=preview(
+                        stderr.decode("utf-8", errors="replace"), max_len=2000
+                    ),
                 )
                 return
-            logger.bind(component="frontend_reload").info("Frontend static rebuild complete")
+            logger.bind(component="frontend_reload").info(
+                "Frontend static rebuild complete"
+            )
             await self._notify_reload_clients()
 
     async def _notify_reload_clients(self) -> None:
@@ -291,10 +348,9 @@ class FrontendReloadService:
                 stale.append(websocket)
         for websocket in stale:
             self._clients.discard(websocket)
-        logger.bind(component="frontend_reload").info("Reload notifications sent client_count={count}", count=len(self._clients))
-
-
-
+        logger.bind(component="frontend_reload").info(
+            "Reload notifications sent client_count={count}", count=len(self._clients)
+        )
 
 
 class ProviderService:
@@ -305,13 +361,19 @@ class ProviderService:
     async def initialize(self) -> None:
         await self._init_db()
         check = self.check_configuration()
-        logger.bind(component="provider").info("Provider configuration check ok={ok} message={message}", ok=check.ok, message=check.message)
+        logger.bind(component="provider").info(
+            "Provider configuration check ok={ok} message={message}",
+            ok=check.ok,
+            message=check.message,
+        )
         if not check.ok:
             raise RuntimeError(check.message)
 
     def check_configuration(self) -> ProviderCheckResult:
         if acompletion is None:
-            return ProviderCheckResult(ok=False, message="LiteLLM is not installed. Eugene cannot start.")
+            return ProviderCheckResult(
+                ok=False, message="LiteLLM is not installed. Eugene cannot start."
+            )
         models = [self.services.config.default_model, self.services.config.router_model]
         if self.services.config.fallback_model:
             models.append(self.services.config.fallback_model)
@@ -325,16 +387,30 @@ class ProviderService:
                     ok=False,
                     message=f"Model '{model}' requires one of {', '.join(requirements)} to be set before startup.",
                 )
-        return ProviderCheckResult(ok=True, message="Provider configuration looks valid.")
+        return ProviderCheckResult(
+            ok=True, message="Provider configuration looks valid."
+        )
 
-    async def route_applets(self, message: Message, applets: list[AppletRecord], mcp_servers: list[dict[str, str]] | None = None) -> list[str]:
-        registry = [{"name": item.name, "description": item.description} for item in applets if item.enabled]
+    async def route_applets(
+        self,
+        message: Message,
+        applets: list[AppletRecord],
+        mcp_servers: list[dict[str, str]] | None = None,
+    ) -> list[str]:
+        registry = [
+            {"name": item.name, "description": item.description}
+            for item in applets
+            if item.enabled
+        ]
         payload: dict[str, Any] = {"message": message.text, "applets": registry}
         if mcp_servers:
             payload["mcp_servers"] = mcp_servers
         prompt = json.dumps(payload, separators=(",", ":"))
         routing_messages = [
-            {"role": "system", "content": "Return only a JSON array of relevant applet and/or MCP server names."},
+            {
+                "role": "system",
+                "content": "Return only a JSON array of relevant applet and/or MCP server names.",
+            },
             {"role": "user", "content": prompt},
         ]
         max_retries = self.services.config.router_retry_attempts
@@ -353,10 +429,14 @@ class ProviderService:
                 last_router_text = result.text
                 selected = self._parse_router_response(result.text)
                 if selected is not None:
-                    logger.bind(component="routing", session_id=message.session_id).info("Router selected applets={selected}", selected=selected)
+                    logger.bind(
+                        component="routing", session_id=message.session_id
+                    ).info("Router selected applets={selected}", selected=selected)
                     return selected
 
-                last_error_text = f"Router output was not a JSON array: {preview(result.text)}"
+                last_error_text = (
+                    f"Router output was not a JSON array: {preview(result.text)}"
+                )
                 if self.services.config.fallback_model:
                     fallback = await self._call_model(
                         model=self.services.config.fallback_model,
@@ -367,7 +447,12 @@ class ProviderService:
                     last_fallback_text = fallback.text
                     selected = self._parse_router_response(fallback.text)
                     if selected is not None:
-                        logger.bind(component="routing", session_id=message.session_id).info("Fallback router selected applets={selected}", selected=selected)
+                        logger.bind(
+                            component="routing", session_id=message.session_id
+                        ).info(
+                            "Fallback router selected applets={selected}",
+                            selected=selected,
+                        )
                         return selected
                     last_error_text = (
                         f"Router output was not a JSON array: {preview(result.text)}; "
@@ -406,9 +491,12 @@ class ProviderService:
             last_router_text=last_router_text,
             last_fallback_text=last_fallback_text,
         )
-        logger.bind(component="routing", session_id=message.session_id).error("Routing failed after retries")
-        raise RuntimeError(f"Routing failed. Router did not return a valid JSON array.{debug_tail}")
-
+        logger.bind(component="routing", session_id=message.session_id).error(
+            "Routing failed after retries"
+        )
+        raise RuntimeError(
+            f"Routing failed. Router did not return a valid JSON array.{debug_tail}"
+        )
 
     async def complete(
         self,
@@ -431,18 +519,25 @@ class ProviderService:
             model=active_model,
             messages=messages,
             origin=origin,
-            tools=[tool.as_llm_tool() for tool in deduped_tools if tool.inject != "never"],
+            tools=[
+                tool.as_llm_tool() for tool in deduped_tools if tool.inject != "never"
+            ],
         )
 
-    async def enforce_context_threshold(self, model: str, messages: list[dict[str, Any]]) -> None:
+    async def enforce_context_threshold(
+        self, model: str, messages: list[dict[str, Any]]
+    ) -> None:
         if get_max_tokens is None:
             return
         resolved_model, model_kwargs = self._prepare_litellm_request(model)
         try:
-            max_context = get_max_tokens(
-                resolved_model,
-                custom_llm_provider=model_kwargs.get("custom_llm_provider"),
-            ) or 0
+            max_context = (
+                get_max_tokens(
+                    resolved_model,
+                    custom_llm_provider=model_kwargs.get("custom_llm_provider"),
+                )
+                or 0
+            )
         except Exception:
             logger.bind(component="provider", model=model).debug(
                 "Skipping context-window lookup because model metadata is unavailable"
@@ -451,7 +546,9 @@ class ProviderService:
         if max_context <= 0:
             return
         approximate = sum(len(item.get("content", "")) for item in messages) // 4
-        if approximate >= int(max_context * self.services.config.context_window_threshold):
+        if approximate >= int(
+            max_context * self.services.config.context_window_threshold
+        ):
             session_id = self._extract_session_id(messages)
             if session_id:
                 await self.services.memory.summarize_working_memory(session_id)
@@ -464,11 +561,17 @@ class ProviderService:
         origin: str,
         tools: list[dict[str, Any]] | None,
     ) -> LLMResult:
+        # Extract session_id BEFORE sanitization strips the key out.
+        session_id = self._extract_session_id(messages)
         outbound_messages = [self._sanitize_message(item) for item in messages]
         if self.services.compressor is not None:
-            outbound_messages = self.services.compressor.compress_messages(outbound_messages, origin=origin, model=model)
+            outbound_messages = self.services.compressor.compress_messages(
+                outbound_messages, origin=origin, model=model
+            )
         resolved_model, request_kwargs = self._prepare_litellm_request(model)
-        message_chars = sum(len(str(item.get("content", ""))) for item in outbound_messages)
+        message_chars = sum(
+            len(str(item.get("content", ""))) for item in outbound_messages
+        )
         tool_chars = len(json.dumps(tools or [], ensure_ascii=False))
         logger.bind(component="provider", origin=origin).debug(
             "Calling LLM model={model} resolved_model={resolved_model} messages={messages} tools={tools} message_chars={message_chars} tool_chars={tool_chars}",
@@ -479,7 +582,6 @@ class ProviderService:
             message_chars=message_chars,
             tool_chars=tool_chars,
         )
-        session_id = self._extract_session_id(messages)
         request_kwargs["stream"] = True
         response_stream = await acompletion(
             model=resolved_model,
@@ -492,20 +594,28 @@ class ProviderService:
         tool_calls_dict: dict[int, dict[str, Any]] = {}
         finish_reason = None
         last_chunk = None
-        
+
         async for chunk in response_stream:
             last_chunk = chunk
             delta = chunk.choices[0].delta
-            
+
             if getattr(delta, "content", None):
                 full_content += delta.content
                 if session_id:
-                    await self.services.event_bus.publish("message.delta", {
-                        "session_id": session_id,
-                        "delta": delta.content,
-                        "channel": "web"
-                    })
-            
+                    # Send directly to the WebSocket — bypassing the event bus queue
+                    # so each token is delivered immediately rather than batching.
+                    ws = self.services.channels.web_sessions.get(session_id)
+                    if ws:
+                        try:
+                            await ws.send_json({
+                                "type": "message.delta",
+                                "session_id": session_id,
+                                "delta": delta.content,
+                                "channel": "web",
+                            })
+                        except Exception:
+                            pass
+
             if getattr(delta, "tool_calls", None):
                 for tc in delta.tool_calls:
                     idx = getattr(tc, "index", 0)
@@ -514,46 +624,60 @@ class ProviderService:
                         func = getattr(tc, "function", None)
                         name = getattr(func, "name", "") if func else ""
                         tool_calls_dict[idx] = {
-                            "id": tc_id, 
+                            "id": tc_id,
                             "type": "function",
-                            "function": {"name": name, "arguments": ""}
+                            "function": {"name": name, "arguments": ""},
                         }
                         if session_id and name:
-                            await self.services.event_bus.publish("message.tool_call", {
-                                "session_id": session_id,
-                                "tool_call_id": tc_id,
-                                "name": name,
-                                "channel": "web"
-                            })
-                    
+                            await self.services.event_bus.publish(
+                                "message.tool_call",
+                                {
+                                    "session_id": session_id,
+                                    "tool_call_id": tc_id,
+                                    "name": name,
+                                    "channel": "web",
+                                },
+                            )
+
                     func = getattr(tc, "function", None)
                     args_delta = getattr(func, "arguments", "") if func else ""
                     if args_delta:
                         tool_calls_dict[idx]["function"]["arguments"] += args_delta
                         if session_id:
-                            await self.services.event_bus.publish("message.tool_call_delta", {
-                                "session_id": session_id,
-                                "tool_call_id": tool_calls_dict[idx]["id"],
-                                "arguments_delta": args_delta,
-                                "channel": "web"
-                            })
-                            
+                            await self.services.event_bus.publish(
+                                "message.tool_call_delta",
+                                {
+                                    "session_id": session_id,
+                                    "tool_call_id": tool_calls_dict[idx]["id"],
+                                    "arguments_delta": args_delta,
+                                    "channel": "web",
+                                },
+                            )
+
             if getattr(chunk.choices[0], "finish_reason", None):
                 finish_reason = chunk.choices[0].finish_reason
 
         usage = getattr(last_chunk, "usage", {}) or {} if last_chunk else {}
-        prompt_tokens = usage.get("prompt_tokens", 0) if isinstance(usage, dict) else getattr(usage, "prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0) if isinstance(usage, dict) else getattr(usage, "completion_tokens", 0)
+        prompt_tokens = (
+            usage.get("prompt_tokens", 0)
+            if isinstance(usage, dict)
+            else getattr(usage, "prompt_tokens", 0)
+        )
+        completion_tokens = (
+            usage.get("completion_tokens", 0)
+            if isinstance(usage, dict)
+            else getattr(usage, "completion_tokens", 0)
+        )
 
         normalized_tool_calls = list(tool_calls_dict.values())
-        
+
         tool_calls = []
         for item in normalized_tool_calls:
             args_str = item["function"]["arguments"] or "{}"
             try:
                 args = json.loads(args_str)
             except json.JSONDecodeError:
-                args = {} 
+                args = {}
             tool_calls.append(
                 ToolCall(
                     id=item.get("id"),
@@ -585,7 +709,10 @@ class ProviderService:
     def _prepare_litellm_request(self, model: str) -> tuple[str, dict[str, Any]]:
         if model.startswith("nvidia_nim/"):
             stripped_model = model.split("/", 1)[1]
-            api_base = os.getenv("NVIDIA_NIM_API_BASE", NVIDIA_NIM_DEFAULT_API_BASE).strip() or NVIDIA_NIM_DEFAULT_API_BASE
+            api_base = (
+                os.getenv("NVIDIA_NIM_API_BASE", NVIDIA_NIM_DEFAULT_API_BASE).strip()
+                or NVIDIA_NIM_DEFAULT_API_BASE
+            )
             return stripped_model, {
                 "custom_llm_provider": "nvidia_nim",
                 "api_base": api_base,
@@ -658,7 +785,9 @@ class ProviderService:
 
     def _sanitize_message(self, message: dict[str, Any]) -> dict[str, Any]:
         allowed_keys = {"role", "content", "name", "tool_call_id", "tool_calls"}
-        sanitized = {key: value for key, value in message.items() if key in allowed_keys}
+        sanitized = {
+            key: value for key, value in message.items() if key in allowed_keys
+        }
         return sanitized
 
     async def _init_db(self) -> None:
@@ -706,12 +835,17 @@ class MemoryService:
     async def initialize(self) -> None:
         await self._init_db()
         self._initialize_semantic_store()
-        logger.bind(component="memory").info("Memory initialized semantic_store={enabled}", enabled=self._collection is not None and self._embedder is not None)
+        logger.bind(component="memory").info(
+            "Memory initialized semantic_store={enabled}",
+            enabled=self._collection is not None and self._embedder is not None,
+        )
 
     async def search_memory(self, query: str, top_k: int = 3) -> list[str]:
         if self._collection is not None and self._embedder is not None:
             embedding = self._embed(query)
-            result = self._collection.query(query_embeddings=[embedding], n_results=top_k)
+            result = self._collection.query(
+                query_embeddings=[embedding], n_results=top_k
+            )
             documents = result.get("documents", [[]])
             return list(documents[0]) if documents else []
         async with aiosqlite.connect(self.db_path) as db:
@@ -724,7 +858,9 @@ class MemoryService:
 
     async def summarize_working_memory(self, session_id: str) -> str:
         window = self.working.get_window(session_id)
-        summary = "\n".join(f"{item['role']}: {item['content'][:180]}" for item in window[-8:])
+        summary = "\n".join(
+            f"{item['role']}: {item['content'][:180]}" for item in window[-8:]
+        )
         self.working.set_summary(session_id, summary)
         return summary
 
@@ -735,29 +871,43 @@ class MemoryService:
                 (session_id, text, datetime.utcnow().isoformat()),
             )
             await db.commit()
-        await self.services.event_bus.publish("memory.stored", {"session_id": session_id})
+        await self.services.event_bus.publish(
+            "memory.stored", {"session_id": session_id}
+        )
 
     async def set_fact(self, key: str, value: str) -> None:
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("insert or replace into structured_facts(key, value) values (?, ?)", (key, value))
+            await db.execute(
+                "insert or replace into structured_facts(key, value) values (?, ?)",
+                (key, value),
+            )
             await db.commit()
 
     async def get_fact(self, key: str) -> str | None:
         async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("select value from structured_facts where key = ?", (key,))
+            cursor = await db.execute(
+                "select value from structured_facts where key = ?", (key,)
+            )
             row = await cursor.fetchone()
         return row[0] if row else None
 
-    async def consolidate_exchange(self, session_id: str, user_text: str, assistant_text: str) -> None:
+    async def consolidate_exchange(
+        self, session_id: str, user_text: str, assistant_text: str
+    ) -> None:
         combined = f"User: {user_text}\nAssistant: {assistant_text}"
         await self.store_exchange(session_id, combined)
         import asyncio
-        asyncio.create_task(self._extract_and_mutate_facts(session_id, user_text, assistant_text))
 
-    async def _extract_and_mutate_facts(self, session_id: str, user_text: str, assistant_text: str) -> None:
+        asyncio.create_task(
+            self._extract_and_mutate_facts(session_id, user_text, assistant_text)
+        )
+
+    async def _extract_and_mutate_facts(
+        self, session_id: str, user_text: str, assistant_text: str
+    ) -> None:
         if self._collection is None or self._embedder is None:
             return
-        
+
         prompt = (
             "You are a background fact extractor. Extract any new, distinct factual assertions "
             "made by the user or the assistant in the following exchange. "
@@ -765,48 +915,54 @@ class MemoryService:
             "in a vector database.\n\n"
             f"User: {user_text}\nAssistant: {assistant_text}\n\n"
             "Respond ONLY with a JSON object in this format:\n"
-            "{\"facts\": [{\"fact\": \"string\", \"search_query\": \"string\"}]}"
+            '{"facts": [{"fact": "string", "search_query": "string"}]}'
         )
-        
+
         try:
             extraction_result = await self.services.provider.complete(
                 model=self.services.config.default_model,
                 messages=[{"role": "user", "content": prompt}],
                 tools=[],
-                origin="memory_extraction"
+                origin="memory_extraction",
             )
-            
+
             import json
+
             text_result = extraction_result.text
-            start = text_result.find('{')
-            end = text_result.rfind('}')
+            start = text_result.find("{")
+            end = text_result.rfind("}")
             if start == -1 or end == -1:
                 return
-            data = json.loads(text_result[start:end+1])
+            data = json.loads(text_result[start : end + 1])
             facts = data.get("facts", [])
             if not facts:
                 return
         except Exception as e:
             from loguru import logger
-            logger.bind(component="memory").error("Fact extraction failed error={error}", error=str(e))
+
+            logger.bind(component="memory").error(
+                "Fact extraction failed error={error}", error=str(e)
+            )
             return
 
         existing_facts_context = []
         for item in facts:
             query = item.get("search_query")
-            if not query: 
+            if not query:
                 continue
-            
+
             embedding = self._embed(query)
             result = self._collection.query(query_embeddings=[embedding], n_results=3)
             docs = result.get("documents", [[]])[0]
             ids = result.get("ids", [[]])[0]
-            
+
             for doc_id, doc in zip(ids, docs):
-                existing_facts_context.append({"id": doc_id, "fact": doc, "related_to": item.get("fact")})
-        
+                existing_facts_context.append(
+                    {"id": doc_id, "fact": doc, "related_to": item.get("fact")}
+                )
+
         unique_existing = {f["id"]: f["fact"] for f in existing_facts_context}
-        
+
         decision_prompt = (
             "You are a memory consolidation manager. "
             "Based on the following NEW extracted facts and EXISTING facts from the database, "
@@ -820,39 +976,43 @@ class MemoryService:
             "- UPSERT: Update an existing fact by its ID, or insert a new fact (use a new unique ID if creating new).\n"
             "- DELETE: Remove a fact by its ID (if it's contradicted or completely superseded).\n\n"
             "Respond ONLY with a JSON object in this format:\n"
-            "{\"operations\": [{\"action\": \"UPSERT\" or \"DELETE\", \"id\": \"string\", \"fact\": \"string (only for UPSERT)\"}]}"
+            '{"operations": [{"action": "UPSERT" or "DELETE", "id": "string", "fact": "string (only for UPSERT)"}]}'
         )
-        
+
         try:
             decision_result = await self.services.provider.complete(
                 model=self.services.config.default_model,
                 messages=[{"role": "user", "content": decision_prompt}],
                 tools=[],
-                origin="memory_decision"
+                origin="memory_decision",
             )
-            
+
             text_result = decision_result.text
-            start = text_result.find('{')
-            end = text_result.rfind('}')
+            start = text_result.find("{")
+            end = text_result.rfind("}")
             if start == -1 or end == -1:
                 return
-            decision_data = json.loads(text_result[start:end+1])
+            decision_data = json.loads(text_result[start : end + 1])
             ops = decision_data.get("operations", [])
         except Exception as e:
             from loguru import logger
-            logger.bind(component="memory").error("Memory decision failed error={error}", error=str(e))
+
+            logger.bind(component="memory").error(
+                "Memory decision failed error={error}", error=str(e)
+            )
             return
-            
+
         for op in ops:
             action = op.get("action")
             op_id = op.get("id")
             fact = op.get("fact")
-            
+
             from uuid import uuid4
             from datetime import datetime
+
             if not op_id:
                 op_id = str(uuid4())
-                
+
             try:
                 if action == "UPSERT" and fact:
                     embedding = self._embed(fact)
@@ -860,17 +1020,33 @@ class MemoryService:
                         ids=[op_id],
                         documents=[fact],
                         embeddings=[embedding],
-                        metadatas=[{"session_id": session_id, "updated_at": datetime.utcnow().isoformat()}]
+                        metadatas=[
+                            {
+                                "session_id": session_id,
+                                "updated_at": datetime.utcnow().isoformat(),
+                            }
+                        ],
                     )
                     from loguru import logger
-                    logger.bind(component="memory").info("Memory UPSERT executed id={id} fact={fact}", id=op_id, fact=fact)
+
+                    logger.bind(component="memory").info(
+                        "Memory UPSERT executed id={id} fact={fact}",
+                        id=op_id,
+                        fact=fact,
+                    )
                 elif action == "DELETE" and op_id:
                     self._collection.delete(ids=[op_id])
                     from loguru import logger
-                    logger.bind(component="memory").info("Memory DELETE executed id={id}", id=op_id)
+
+                    logger.bind(component="memory").info(
+                        "Memory DELETE executed id={id}", id=op_id
+                    )
             except Exception as e:
                 from loguru import logger
-                logger.bind(component="memory").error("Chroma operation failed error={error}", error=str(e))
+
+                logger.bind(component="memory").error(
+                    "Chroma operation failed error={error}", error=str(e)
+                )
 
     async def _init_db(self) -> None:
         async with aiosqlite.connect(self.db_path) as db:
@@ -909,7 +1085,9 @@ class MemoryService:
         if chromadb is None or ChromaSettings is None or SentenceTransformer is None:
             return
         self.chroma_path.mkdir(exist_ok=True)
-        client = chromadb.PersistentClient(path=str(self.chroma_path), settings=ChromaSettings(allow_reset=False))
+        client = chromadb.PersistentClient(
+            path=str(self.chroma_path), settings=ChromaSettings(allow_reset=False)
+        )
         self._collection = client.get_or_create_collection("memories")
         self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -920,9 +1098,10 @@ class MemoryService:
 
 class MCPServerRecord(BaseModel):
     """A single entry from mcp_registry.json."""
+
     name: str
     package: str = ""
-    transport: str = "npm"   # "npm" or "command"
+    transport: str = "npm"  # "npm" or "command"
     command: str = ""
     args: list[str] = Field(default_factory=list)
     description: str = ""
@@ -958,7 +1137,9 @@ class MCPManager:
     def load_registry(self, path: Path | None = None) -> None:
         registry_path = path or (ROOT_DIR / "mcp_registry.json")
         if not registry_path.exists():
-            logger.bind(component="mcp").info("No mcp_registry.json found; external MCP servers disabled")
+            logger.bind(component="mcp").info(
+                "No mcp_registry.json found; external MCP servers disabled"
+            )
             return
         try:
             raw = json.loads(registry_path.read_text(encoding="utf-8"))
@@ -979,7 +1160,11 @@ class MCPManager:
         # Applet-level eager starts (backward compat)
         if self.services.applets:
             for record in self.services.applets.registry.values():
-                if record.enabled and record.mcp_start == "eager" and record.load == "eager":
+                if (
+                    record.enabled
+                    and record.mcp_start == "eager"
+                    and record.load == "eager"
+                ):
                     self.started.add(record.name)
         # External MCP servers with lazy=false
         for name, record in self.registry.items():
@@ -997,14 +1182,18 @@ class MCPManager:
             return
         record = self.registry.get(name)
         if record is None:
-            logger.bind(component="mcp", server=name).warning("MCP server not found in registry")
+            logger.bind(component="mcp", server=name).warning(
+                "MCP server not found in registry"
+            )
             return
 
         try:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
         except ImportError:
-            logger.bind(component="mcp", server=name).error("mcp package not installed; cannot start external servers")
+            logger.bind(component="mcp", server=name).error(
+                "mcp package not installed; cannot start external servers"
+            )
             self.degraded[name] = "mcp package not installed"
             return
 
@@ -1023,7 +1212,9 @@ class MCPManager:
             server_params = StdioServerParameters(command=cmd, args=cmd_args, env=env)
             transport = await stack.enter_async_context(stdio_client(server_params))
             read_stream, write_stream = transport
-            session: ClientSession = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+            session: ClientSession = await stack.enter_async_context(
+                ClientSession(read_stream, write_stream)
+            )
             await session.initialize()
 
             tools_result = await session.list_tools()
@@ -1033,7 +1224,9 @@ class MCPManager:
                 ToolDefinition(
                     name=tool.name,
                     description=tool.description or "",
-                    input_schema=tool.inputSchema if hasattr(tool, "inputSchema") else (tool.input_schema if hasattr(tool, "input_schema") else {}),
+                    input_schema=tool.inputSchema
+                    if hasattr(tool, "inputSchema")
+                    else (tool.input_schema if hasattr(tool, "input_schema") else {}),
                     applet_name=f"mcp:{name}",
                 )
                 for tool in tools_result.tools
@@ -1045,10 +1238,14 @@ class MCPManager:
             )
         except Exception:
             await stack.aclose()
-            logger.bind(component="mcp", server=name).exception("Failed to start external MCP server")
+            logger.bind(component="mcp", server=name).exception(
+                "Failed to start external MCP server"
+            )
             self.degraded[name] = "startup failed"
 
-    async def call_tool(self, server_name: str, tool_name: str, arguments: dict[str, Any]) -> Any:
+    async def call_tool(
+        self, server_name: str, tool_name: str, arguments: dict[str, Any]
+    ) -> Any:
         """Dispatch a tool call to an external MCP server."""
         running = self._running.get(server_name)
         if running is None or running.session is None:
@@ -1066,7 +1263,9 @@ class MCPManager:
                 return "\n".join(texts)
             return str(result)
         except Exception as exc:
-            logger.bind(component="mcp", server=server_name, tool=tool_name).exception("MCP tool call failed")
+            logger.bind(component="mcp", server=server_name, tool=tool_name).exception(
+                "MCP tool call failed"
+            )
             return {"error": f"MCP tool call failed: {exc}"}
 
     async def stop(self) -> None:
@@ -1075,9 +1274,13 @@ class MCPManager:
             try:
                 if running._cm_stack:
                     await running._cm_stack.aclose()
-                logger.bind(component="mcp", server=name).info("External MCP server stopped")
+                logger.bind(component="mcp", server=name).info(
+                    "External MCP server stopped"
+                )
             except Exception:
-                logger.bind(component="mcp", server=name).exception("Error stopping MCP server")
+                logger.bind(component="mcp", server=name).exception(
+                    "Error stopping MCP server"
+                )
         self._running.clear()
 
     # ── tool queries ─────────────────────────────────────────────────
@@ -1133,7 +1336,9 @@ class FileHandler:
 
     async def resolve_message(self, message: Message) -> Message:
         resolved: list[Attachment] = []
-        logger.bind(component="files", session_id=message.session_id).debug("Resolving attachments count={count}", count=len(message.attachments))
+        logger.bind(component="files", session_id=message.session_id).debug(
+            "Resolving attachments count={count}", count=len(message.attachments)
+        )
         for item in message.attachments:
             if isinstance(item, Attachment):
                 resolved.append(item)
@@ -1147,7 +1352,13 @@ class FileHandler:
                     file_type=attachment.file_type,
                     chunked=attachment.chunked,
                 )
-                await self.services.event_bus.publish("file.attached", {"session_id": message.session_id, "attachment": attachment.model_dump(mode="json")})
+                await self.services.event_bus.publish(
+                    "file.attached",
+                    {
+                        "session_id": message.session_id,
+                        "attachment": attachment.model_dump(mode="json"),
+                    },
+                )
         return message.model_copy(update={"attachments": resolved})
 
     async def _resolve_attachment(self, ref: str) -> Attachment | None:
@@ -1164,10 +1375,27 @@ class FileHandler:
         file_type = self._detect_type(path, raw)
         if file_type == "application/pdf":
             content = await self._extract_pdf(path)
-            return Attachment(original_filename=path.name, file_type=file_type, content=content, chunked=len(content) > 8_000)
-        if file_type.startswith("text/") or path.suffix.lower() in {".md", ".py", ".toml", ".json", ".yaml", ".yml"}:
+            return Attachment(
+                original_filename=path.name,
+                file_type=file_type,
+                content=content,
+                chunked=len(content) > 8_000,
+            )
+        if file_type.startswith("text/") or path.suffix.lower() in {
+            ".md",
+            ".py",
+            ".toml",
+            ".json",
+            ".yaml",
+            ".yml",
+        }:
             text = raw.decode("utf-8", errors="replace")
-            return Attachment(original_filename=path.name, file_type=file_type, content=text[:8_000], chunked=len(text) > 8_000)
+            return Attachment(
+                original_filename=path.name,
+                file_type=file_type,
+                content=text[:8_000],
+                chunked=len(text) > 8_000,
+            )
         if file_type.startswith("image/"):
             return Attachment(
                 original_filename=path.name,
@@ -1175,7 +1403,12 @@ class FileHandler:
                 content=f"Image attachment available at {path}. Use a vision-capable model or summarize externally if needed.",
                 metadata={"path": str(path)},
             )
-        return Attachment(original_filename=path.name, file_type=file_type, content=f"Attachment available at {path}", metadata={"path": str(path)})
+        return Attachment(
+            original_filename=path.name,
+            file_type=file_type,
+            content=f"Attachment available at {path}",
+            metadata={"path": str(path)},
+        )
 
     def _detect_type(self, path: Path, raw: bytes) -> str:
         if magic:
@@ -1199,7 +1432,9 @@ class AppletManager:
         self.instances: dict[str, AppletBase] = {}
 
     async def scan(self) -> None:
-        logger.bind(component="applets").info("Scanning applets path={path}", path=str(APPLETS_DIR))
+        logger.bind(component="applets").info(
+            "Scanning applets path={path}", path=str(APPLETS_DIR)
+        )
         for folder in sorted(path for path in APPLETS_DIR.iterdir() if path.is_dir()):
             meta_path = folder / "applet.toml"
             applet_file = folder / "applet.py"
@@ -1214,20 +1449,30 @@ class AppletManager:
                 config_schema = self._config_schema(cls)
                 record = AppletRecord(
                     name=name,
-                    description=values.get("description", getattr(cls, "description", "")),
+                    description=values.get(
+                        "description", getattr(cls, "description", "")
+                    ),
                     module_path=str(applet_file),
                     folder_path=str(folder),
                     enabled=values.get("enabled", True),
                     load=getattr(cls, "load", "lazy"),
                     inject=getattr(cls, "inject", "selective"),
-                    mcp_start="lazy" if getattr(cls, "load", "lazy") == "lazy" else getattr(cls, "mcp_start", "lazy"),
+                    mcp_start="lazy"
+                    if getattr(cls, "load", "lazy") == "lazy"
+                    else getattr(cls, "mcp_start", "lazy"),
                     can_disable=getattr(cls, "can_disable", True),
                     config=self._merge_config(name, values, cls),
                     config_schema=config_schema,
-                    status="disabled" if not values.get("enabled", True) else "discovered",
+                    status="disabled"
+                    if not values.get("enabled", True)
+                    else "discovered",
                 )
                 self.registry[name] = record
-                logger.bind(component="applets", applet=name).debug("Applet discovered enabled={enabled} load={load}", enabled=record.enabled, load=record.load)
+                logger.bind(component="applets", applet=name).debug(
+                    "Applet discovered enabled={enabled} load={load}",
+                    enabled=record.enabled,
+                    load=record.load,
+                )
             except Exception as exc:
                 broken_name = folder.name
                 self.registry[broken_name] = AppletRecord(
@@ -1239,7 +1484,9 @@ class AppletManager:
                     errors=[str(exc)],
                     status="degraded",
                 )
-                logger.bind(component="applets", applet=broken_name).exception("Applet discovery failed")
+                logger.bind(component="applets", applet=broken_name).exception(
+                    "Applet discovery failed"
+                )
         for name, record in self.registry.items():
             if record.enabled and record.load == "eager":
                 await self.load_applet(name)
@@ -1263,7 +1510,13 @@ class AppletManager:
                 if task.id not in scheduler.tasks:
                     await scheduler.register(task)
         if type(instance).on_event is not AppletBase.on_event:
-            for event_name in ("message.received", "file.attached", "task.fired", "memory.stored", "personality.updated"):
+            for event_name in (
+                "message.received",
+                "file.attached",
+                "task.fired",
+                "memory.stored",
+                "personality.updated",
+            ):
                 self.services.event_bus.subscribe(event_name, instance.on_event)
         await self.services.event_bus.publish("applet.loaded", {"name": name})
         logger.bind(component="applets", applet=name).info("Applet loaded")
@@ -1318,18 +1571,31 @@ class AppletManager:
             instance = await self.load_applet(name)
             for definition in instance.get_trigger_definitions():
                 found = True
-                lines.append(f"- {definition.applet_name}.{definition.name}: {definition.description}")
+                lines.append(
+                    f"- {definition.applet_name}.{definition.name}: {definition.description}"
+                )
         if not found:
             lines.append("- none")
         return "\n".join(lines)
 
     def awareness_block(self) -> str:
-        applet_lines = [f"- {item.name}: {item.description}" for item in self.registry.values() if item.enabled]
-        channel_lines = [f"- {item.name}: {'connected' if item.connected else 'idle'}" for item in self.services.channels.statuses().values()]
+        applet_lines = [
+            f"- {item.name}: {item.description}"
+            for item in self.registry.values()
+            if item.enabled
+        ]
+        channel_lines = [
+            f"- {item.name}: {'connected' if item.connected else 'idle'}"
+            for item in self.services.channels.statuses().values()
+        ]
         task_count = len(self.services.scheduler.tasks)
         proactive_count = len(getattr(self.services.proactive, "triggers", {}))
         mcp_registry = self.services.mcp.get_registry_for_router()
-        mcp_lines = [f"- {s['name']}: {s['description']}" for s in mcp_registry] if mcp_registry else ["- none"]
+        mcp_lines = (
+            [f"- {s['name']}: {s['description']}" for s in mcp_registry]
+            if mcp_registry
+            else ["- none"]
+        )
         mcp_running = list(self.services.mcp._running.keys())
         parts = [
             "Self-awareness:",
@@ -1340,12 +1606,14 @@ class AppletManager:
         ]
         if mcp_running:
             parts.append(f"Running MCP servers: {', '.join(mcp_running)}")
-        parts.extend([
-            "Connected channels:",
-            *(channel_lines or ["- none"]),
-            f"Scheduled tasks: {task_count}",
-            f"Proactive triggers: {proactive_count}",
-        ])
+        parts.extend(
+            [
+                "Connected channels:",
+                *(channel_lines or ["- none"]),
+                f"Scheduled tasks: {task_count}",
+                f"Proactive triggers: {proactive_count}",
+            ]
+        )
         return "\n".join(parts)
 
     def routes(self) -> list[tuple[str, APIRouter]]:
@@ -1369,15 +1637,26 @@ class AppletManager:
         if source == "dynamic:active_channels":
             return sorted(self.services.channels.channels.keys())
         if source == "dynamic:enabled_applets":
-            return sorted(name for name, record in self.registry.items() if record.enabled)
+            return sorted(
+                name for name, record in self.registry.items() if record.enabled
+            )
         if source == "dynamic:active_providers":
-            return sorted({self.services.config.default_model.split("/", 1)[0], self.services.config.router_model.split("/", 1)[0]})
+            return sorted(
+                {
+                    self.services.config.default_model.split("/", 1)[0],
+                    self.services.config.router_model.split("/", 1)[0],
+                }
+            )
         return []
 
-    def _merge_config(self, name: str, toml_values: dict[str, Any], cls: type[AppletBase]) -> dict[str, Any]:
+    def _merge_config(
+        self, name: str, toml_values: dict[str, Any], cls: type[AppletBase]
+    ) -> dict[str, Any]:
         schema = getattr(getattr(cls, "Config", object), "fields", {})
         merged = {field: spec.default for field, spec in schema.items()}
-        merged.update({key: value for key, value in toml_values.items() if key != "description"})
+        merged.update(
+            {key: value for key, value in toml_values.items() if key != "description"}
+        )
         user_path = DATA_DIR / "applet_configs" / f"{name}.json"
         if user_path.exists():
             merged.update(json.loads(user_path.read_text(encoding="utf-8")))
@@ -1388,7 +1667,7 @@ class AppletManager:
         for env_key, env_val in os.environ.items():
             if not env_key.upper().startswith(prefix):
                 continue
-            field_name = env_key[len(prefix):].lower()
+            field_name = env_key[len(prefix) :].lower()
             if field_name not in merged and field_name not in schema:
                 continue  # skip unknown keys not declared in Config.fields
             # Type-coerce to match the schema default type
@@ -1431,10 +1710,14 @@ class AppletManager:
         if not isinstance(applet_block, dict) or not applet_block:
             raise RuntimeError("applet.toml must declare a [applet.name] table.")
         if len(applet_block) != 1:
-            raise RuntimeError("applet.toml must declare exactly one [applet.name] table.")
+            raise RuntimeError(
+                "applet.toml must declare exactly one [applet.name] table."
+            )
         name, values = next(iter(applet_block.items()))
         if not isinstance(values, dict):
-            raise RuntimeError("applet.toml applet table must contain key-value settings.")
+            raise RuntimeError(
+                "applet.toml applet table must contain key-value settings."
+            )
         return name, dict(values)
 
     def _check_requirements(self, record: AppletRecord) -> None:
@@ -1446,13 +1729,21 @@ class AppletManager:
             requirement = requirement.strip()
             if not requirement or requirement.startswith("#"):
                 continue
-            module_name = requirement.split("[", 1)[0].split("=", 1)[0].split("<", 1)[0].split(">", 1)[0].replace("-", "_")
+            module_name = (
+                requirement.split("[", 1)[0]
+                .split("=", 1)[0]
+                .split("<", 1)[0]
+                .split(">", 1)[0]
+                .replace("-", "_")
+            )
             try:
                 __import__(module_name)
             except ImportError:
                 missing.append(requirement)
         if missing:
-            raise RuntimeError(f"Applet '{record.name}' is missing requirements: {', '.join(missing)}")
+            raise RuntimeError(
+                f"Applet '{record.name}' is missing requirements: {', '.join(missing)}"
+            )
 
 
 class ChannelManager:
@@ -1465,7 +1756,9 @@ class ChannelManager:
         self._status: dict[str, ChannelStatus] = {}
 
     async def scan(self) -> None:
-        logger.bind(component="channels").info("Scanning channels path={path}", path=str(CHANNELS_DIR))
+        logger.bind(component="channels").info(
+            "Scanning channels path={path}", path=str(CHANNELS_DIR)
+        )
         for path in sorted(CHANNELS_DIR.glob("*.py")):
             cls = discover_subclass(path, ChannelBase)
             if cls is None:
@@ -1473,8 +1766,13 @@ class ChannelManager:
             channel = cls(self.services)
             self.channels[channel.name] = channel
             enabled = self.services.config.channels.get(channel.name, None)
-            self._status[channel.name] = ChannelStatus(name=channel.name, enabled=enabled.enabled if enabled else True)
-            logger.bind(component="channels", channel=channel.name).debug("Channel discovered enabled={enabled}", enabled=self._status[channel.name].enabled)
+            self._status[channel.name] = ChannelStatus(
+                name=channel.name, enabled=enabled.enabled if enabled else True
+            )
+            logger.bind(component="channels", channel=channel.name).debug(
+                "Channel discovered enabled={enabled}",
+                enabled=self._status[channel.name].enabled,
+            )
 
     async def start(self) -> None:
         for name, channel in self.channels.items():
@@ -1489,7 +1787,13 @@ class ChannelManager:
         for task in self._tasks:
             task.cancel()
 
-    async def deliver(self, response: str, channel_name: str, session_id: str, metadata: dict[str, Any] | None = None) -> None:
+    async def deliver(
+        self,
+        response: str,
+        channel_name: str,
+        session_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         channel = self.channels[channel_name]
         await channel.send(response, session_id, metadata=metadata)
 
@@ -1517,7 +1821,9 @@ class ChannelManager:
         except Exception as exc:  # pragma: no cover
             self._status[name].connected = False
             self._status[name].details = str(exc)
-            logger.bind(component="channels", channel=name).exception("Channel failed to start")
+            logger.bind(component="channels", channel=name).exception(
+                "Channel failed to start"
+            )
 
 
 class ProactiveTriggerService:
@@ -1551,7 +1857,9 @@ class ProactiveTriggerService:
         self.triggers[trigger.id] = trigger
         await self._persist(trigger)
         self._rebuild_index()
-        await self.services.event_bus.publish("proactive.trigger_registered", {"trigger_id": trigger.id})
+        await self.services.event_bus.publish(
+            "proactive.trigger_registered", {"trigger_id": trigger.id}
+        )
         logger.bind(component="proactive", trigger_id=trigger.id).info(
             "Registered proactive trigger name={name} source={source} signal={signal}",
             name=trigger.name,
@@ -1564,10 +1872,14 @@ class ProactiveTriggerService:
         self.triggers.pop(trigger_id, None)
         self._rebuild_index()
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("delete from proactive_triggers where id = ?", (trigger_id,))
+            await db.execute(
+                "delete from proactive_triggers where id = ?", (trigger_id,)
+            )
             await db.commit()
 
-    async def emit(self, *, applet_name: str, signal_name: str, payload: dict[str, Any]) -> int:
+    async def emit(
+        self, *, applet_name: str, signal_name: str, payload: dict[str, Any]
+    ) -> int:
         candidate_ids = self._index.get((applet_name, signal_name), [])
         if not candidate_ids:
             return 0
@@ -1587,7 +1899,9 @@ class ProactiveTriggerService:
     def available_signal_map(self) -> dict[str, list[str]]:
         signal_map: dict[str, list[str]] = {}
         for instance in self.services.applets.instances.values():
-            names = [definition.name for definition in instance.get_trigger_definitions()]
+            names = [
+                definition.name for definition in instance.get_trigger_definitions()
+            ]
             if names:
                 signal_map[instance.name] = names
         return signal_map
@@ -1608,15 +1922,25 @@ class ProactiveTriggerService:
         delta = datetime.utcnow() - trigger.last_fired_at
         return delta.total_seconds() < trigger.cooldown_seconds
 
-    async def _fire_trigger(self, trigger: ProactiveTrigger, payload: dict[str, Any]) -> None:
-        source_channel = trigger.origin_channel or self.services.config.primary_channel or "web"
+    async def _fire_trigger(
+        self, trigger: ProactiveTrigger, payload: dict[str, Any]
+    ) -> None:
+        source_channel = (
+            trigger.origin_channel or self.services.config.primary_channel or "web"
+        )
         session_id = trigger.session_id or str(uuid4())
         if source_channel == "web":
-            if trigger.session_id and trigger.session_id in self.services.channels.web_sessions:
+            if (
+                trigger.session_id
+                and trigger.session_id in self.services.channels.web_sessions
+            ):
                 session_id = trigger.session_id
             elif self.services.channels.web_sessions:
                 session_id = next(iter(self.services.channels.web_sessions))
-            elif self.services.config.primary_channel and self.services.config.primary_channel != "web":
+            elif (
+                self.services.config.primary_channel
+                and self.services.config.primary_channel != "web"
+            ):
                 source_channel = self.services.config.primary_channel
         event_context = {
             "source_applet": trigger.source_applet,
@@ -1644,13 +1968,22 @@ class ProactiveTriggerService:
         await self._persist(trigger)
         await self.services.event_bus.publish(
             "proactive.trigger_fired",
-            {"trigger_id": trigger.id, "source_applet": trigger.source_applet, "signal_name": trigger.signal_name},
+            {
+                "trigger_id": trigger.id,
+                "source_applet": trigger.source_applet,
+                "signal_name": trigger.signal_name,
+            },
         )
-        await self.services.event_bus.publish("message.received", {"message": message.model_dump(mode="json")})
+        await self.services.event_bus.publish(
+            "message.received", {"message": message.model_dump(mode="json")}
+        )
 
     async def _persist(self, trigger: ProactiveTrigger) -> None:
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("insert or replace into proactive_triggers(id, payload) values (?, ?)", (trigger.id, trigger.model_dump_json()))
+            await db.execute(
+                "insert or replace into proactive_triggers(id, payload) values (?, ?)",
+                (trigger.id, trigger.model_dump_json()),
+            )
             await db.commit()
 
     async def _load_persisted_triggers(self) -> None:
@@ -1673,7 +2006,11 @@ class SchedulerService:
     def __init__(self, services: ServiceContainer) -> None:
         self.services = services
         self.db_path = DATA_DIR / "eugene.db"
-        self.scheduler = AsyncIOScheduler(jobstores={"default": MemoryJobStore()}) if AsyncIOScheduler and MemoryJobStore else None
+        self.scheduler = (
+            AsyncIOScheduler(jobstores={"default": MemoryJobStore()})
+            if AsyncIOScheduler and MemoryJobStore
+            else None
+        )
         self.tasks: dict[str, ScheduledTask] = {}
 
     async def initialize(self) -> None:
@@ -1748,20 +2085,34 @@ class SchedulerService:
             trigger = CronTrigger.from_crontab(task.trigger_value, timezone=timezone)
         else:
             trigger = DateTrigger(run_date=datetime.fromisoformat(task.trigger_value))
-        self.scheduler.add_job(self._fire_task, trigger=trigger, id=task.id, replace_existing=True, kwargs={"task_id": task.id})
+        self.scheduler.add_job(
+            self._fire_task,
+            trigger=trigger,
+            id=task.id,
+            replace_existing=True,
+            kwargs={"task_id": task.id},
+        )
 
     async def _fire_task(self, task_id: str) -> None:
         task = self.tasks[task_id]
-        source_channel = task.origin_channel or self.services.config.primary_channel or "web"
+        source_channel = (
+            task.origin_channel or self.services.config.primary_channel or "web"
+        )
         channel_status = self.services.channels.statuses().get(source_channel)
 
-        if task.trigger_type == "cron" and (source_channel not in self.services.channels.channels or not channel_status or not channel_status.enabled):
-            logger.bind(component="scheduler", task_id=task_id, channel=source_channel).warning(
-                "Skipping cron task because channel is unavailable"
-            )
+        if task.trigger_type == "cron" and (
+            source_channel not in self.services.channels.channels
+            or not channel_status
+            or not channel_status.enabled
+        ):
+            logger.bind(
+                component="scheduler", task_id=task_id, channel=source_channel
+            ).warning("Skipping cron task because channel is unavailable")
             return
 
-        logger.bind(component="scheduler", task_id=task_id, channel=source_channel).info("Firing scheduled task")
+        logger.bind(
+            component="scheduler", task_id=task_id, channel=source_channel
+        ).info("Firing scheduled task")
         message = Message(
             text=task.prompt,
             source_channel=source_channel,
@@ -1770,11 +2121,16 @@ class SchedulerService:
             metadata={"task_id": task.id, "applet_name": task.applet_name},
         )
         await self.services.event_bus.publish("task.fired", {"task_id": task.id})
-        await self.services.event_bus.publish("message.received", {"message": message.model_dump(mode="json")})
+        await self.services.event_bus.publish(
+            "message.received", {"message": message.model_dump(mode="json")}
+        )
 
     async def _persist(self, task: ScheduledTask) -> None:
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("insert or replace into scheduled_tasks(id, payload) values (?, ?)", (task.id, task.model_dump_json()))
+            await db.execute(
+                "insert or replace into scheduled_tasks(id, payload) values (?, ?)",
+                (task.id, task.model_dump_json()),
+            )
             await db.commit()
 
     async def _load_persisted_tasks(self) -> None:
@@ -1804,7 +2160,9 @@ class EugeneCore:
         services.event_bus.subscribe("message.response", self._handle_response_event)
         services.event_bus.subscribe("message.delta", self._handle_stream_event)
         services.event_bus.subscribe("message.tool_call", self._handle_stream_event)
-        services.event_bus.subscribe("message.tool_call_delta", self._handle_stream_event)
+        services.event_bus.subscribe(
+            "message.tool_call_delta", self._handle_stream_event
+        )
         services.event_bus.subscribe("message.tool_result", self._handle_stream_event)
 
     async def _handle_stream_event(self, event) -> None:
@@ -1812,7 +2170,7 @@ class EugeneCore:
         session_id = event.payload.get("session_id")
         if not session_id:
             return
-        
+
         if channel_name == "web":
             websocket = self.services.channels.web_sessions.get(session_id)
             if websocket:
@@ -1841,10 +2199,14 @@ class EugeneCore:
         try:
             mcp_servers = self.services.mcp.get_registry_for_router()
             selected_names = await self.services.provider.route_applets(
-                normalized, list(self.services.applets.registry.values()), mcp_servers=mcp_servers or None,
+                normalized,
+                list(self.services.applets.registry.values()),
+                mcp_servers=mcp_servers or None,
             )
             # Separate applet names from MCP server names
-            mcp_server_names = {r["name"] for r in mcp_servers} if mcp_servers else set()
+            mcp_server_names = (
+                {r["name"] for r in mcp_servers} if mcp_servers else set()
+            )
             applet_names = [n for n in selected_names if n not in mcp_server_names]
             selected_mcp_names = [n for n in selected_names if n in mcp_server_names]
 
@@ -1902,15 +2264,18 @@ class EugeneCore:
                         source_channel=normalized.source_channel,
                     )
                     serialized_output = self._serialize_tool_output(call.name, output)
-                    
+
                     if normalized.source_channel == "web":
-                        await self.services.event_bus.publish("message.tool_result", {
-                            "session_id": prompt.session_id,
-                            "tool_call_id": call.id or call.name,
-                            "result": serialized_output,
-                            "channel": "web"
-                        })
-                        
+                        await self.services.event_bus.publish(
+                            "message.tool_result",
+                            {
+                                "session_id": prompt.session_id,
+                                "tool_call_id": call.id or call.name,
+                                "result": serialized_output,
+                                "channel": "web",
+                            },
+                        )
+
                     prompt.messages.append(
                         {
                             "role": "tool",
@@ -1929,13 +2294,28 @@ class EugeneCore:
                 )
 
             response_text = result.text
-            self.logger.info("Message handled session_id={session_id} response_len={response_len}", session_id=normalized.session_id, response_len=len(response_text))
-            asyncio.create_task(self.services.memory.consolidate_exchange(normalized.session_id, normalized.text, response_text))
+            self.logger.info(
+                "Message handled session_id={session_id} response_len={response_len}",
+                session_id=normalized.session_id,
+                response_len=len(response_text),
+            )
+            asyncio.create_task(
+                self.services.memory.consolidate_exchange(
+                    normalized.session_id, normalized.text, response_text
+                )
+            )
         except Exception as exc:
-            self.logger.exception("Message handling failed session_id={session_id}", session_id=normalized.session_id)
-            response_text = f"Eugene hit an internal error while handling this message: {exc}"
+            self.logger.exception(
+                "Message handling failed session_id={session_id}",
+                session_id=normalized.session_id,
+            )
+            response_text = (
+                f"Eugene hit an internal error while handling this message: {exc}"
+            )
 
-        self.services.memory.working.add_turn(normalized.session_id, "assistant", response_text)
+        self.services.memory.working.add_turn(
+            normalized.session_id, "assistant", response_text
+        )
         await self._log_history(normalized.session_id, "assistant", response_text)
         await self.services.event_bus.publish(
             "message.response",
@@ -1960,22 +2340,37 @@ class EugeneCore:
             metadata=event.payload.get("metadata"),
         )
 
-    async def _build_prompt(self, message: Message, selected_names: list[str]) -> PromptBundle:
+    async def _build_prompt(
+        self, message: Message, selected_names: list[str]
+    ) -> PromptBundle:
         system_parts = list(await self.services.applets.context_blocks())
         system_parts.append(self.services.applets.awareness_block())
         system_parts.append(await self.services.applets.trigger_catalog_block())
+        system_parts.append(
+            r"CRITICAL MATH FORMATTING: You must use $$ for block equations and $ for inline equations. DO NOT use \[ \], \( \), or raw brackets for math."
+        )
         if message.trigger == TriggerKind.PROACTIVE:
             system_parts.append(
                 "This message was triggered proactively by an applet-emitted condition. "
                 "Act on the trigger context in the user's latest message instead of asking what to do next unless clarification is truly required."
             )
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": "\n\n".join(part for part in system_parts if part), "session_id": message.session_id}
+            {
+                "role": "system",
+                "content": "\n\n".join(part for part in system_parts if part),
+                "session_id": message.session_id,
+            }
         ]
         for turn in self.services.memory.working.get_window(message.session_id):
             turn["session_id"] = message.session_id
             messages.append(turn)
-        messages.append({"role": "user", "content": self._message_content(message), "session_id": message.session_id})
+        messages.append(
+            {
+                "role": "user",
+                "content": self._message_content(message),
+                "session_id": message.session_id,
+            }
+        )
         return PromptBundle(messages=messages, session_id=message.session_id)
 
     async def _dispatch_tool(
@@ -1986,43 +2381,66 @@ class EugeneCore:
         session_id: str,
         source_channel: str,
     ) -> Any:
-        tool_logger = logger.bind(component="tool_call", tool_name=call.name, tool_call_id=call.id or "")
+        tool_logger = logger.bind(
+            component="tool_call", tool_name=call.name, tool_call_id=call.id or ""
+        )
         runtime_arguments = dict(call.arguments)
         runtime_arguments["_runtime_session_id"] = session_id
         runtime_arguments["_runtime_source_channel"] = source_channel
-        tool_logger.info("Dispatch start arguments={arguments}", arguments=preview(runtime_arguments))
+        tool_logger.info(
+            "Dispatch start arguments={arguments}", arguments=preview(runtime_arguments)
+        )
         for applet in self.services.applets.instances.values():
             for tool in applet.get_tools():
                 if tool.name == call.name:
-                    tool_logger.debug("Dispatch target applet={applet}", applet=applet.name)
+                    tool_logger.debug(
+                        "Dispatch target applet={applet}", applet=applet.name
+                    )
                     try:
                         output = await applet.handle_tool(call.name, runtime_arguments)
-                        tool_logger.info("Dispatch success output={output}", output=preview(output))
+                        tool_logger.info(
+                            "Dispatch success output={output}", output=preview(output)
+                        )
                         return output
                     except Exception as e:
-                        tool_logger.error("Dispatch applet tool failed error={error}", error=str(e))
+                        tool_logger.error(
+                            "Dispatch applet tool failed error={error}", error=str(e)
+                        )
                         return {"error": f"Tool execution failed: {e}"}
         for applet in selected_applets:
             for tool in applet.get_tools():
                 if tool.name == call.name:
-                    tool_logger.debug("Dispatch target applet={applet}", applet=applet.name)
+                    tool_logger.debug(
+                        "Dispatch target applet={applet}", applet=applet.name
+                    )
                     try:
                         output = await applet.handle_tool(call.name, runtime_arguments)
-                        tool_logger.info("Dispatch success output={output}", output=preview(output))
+                        tool_logger.info(
+                            "Dispatch success output={output}", output=preview(output)
+                        )
                         return output
                     except Exception as e:
-                        tool_logger.error("Dispatch selected applet tool failed error={error}", error=str(e))
+                        tool_logger.error(
+                            "Dispatch selected applet tool failed error={error}",
+                            error=str(e),
+                        )
                         return {"error": f"Tool execution failed: {e}"}
         # Fallback: check running MCP servers
         mcp_server = self.services.mcp.find_server_for_tool(call.name)
         if mcp_server:
             tool_logger.debug("Dispatch target mcp_server={server}", server=mcp_server)
             try:
-                output = await self.services.mcp.call_tool(mcp_server, call.name, runtime_arguments)
-                tool_logger.info("Dispatch success (MCP) output={output}", output=preview(output))
+                output = await self.services.mcp.call_tool(
+                    mcp_server, call.name, runtime_arguments
+                )
+                tool_logger.info(
+                    "Dispatch success (MCP) output={output}", output=preview(output)
+                )
                 return output
             except Exception as e:
-                tool_logger.error("Dispatch MCP tool failed error={error}", error=str(e))
+                tool_logger.error(
+                    "Dispatch MCP tool failed error={error}", error=str(e)
+                )
                 return {"error": f"MCP tool execution failed: {e}"}
         tool_logger.error("Dispatch failed unknown tool")
         return {"error": f"Unknown tool {call.name}"}
@@ -2047,14 +2465,18 @@ class EugeneCore:
                     attempt=attempt + 1,
                     total=max_retries + 1,
                 )
-                return await self.services.provider.complete(messages=messages, tools=tools)
+                return await self.services.provider.complete(
+                    messages=messages, tools=tools
+                )
             except Exception as exc:
                 if not self._is_tool_call_validation_error(exc):
                     raise
                 last_error = exc
                 missing_tool = self._extract_missing_tool_name(exc)
                 if missing_tool:
-                    injected = await self._ensure_missing_tool_available(missing_tool, tools, selected_names)
+                    injected = await self._ensure_missing_tool_available(
+                        missing_tool, tools, selected_names
+                    )
                     self.logger.warning(
                         "Missing tool detected tool={tool} injected={injected}",
                         tool=missing_tool,
@@ -2076,7 +2498,9 @@ class EugeneCore:
                         session_id=session_id,
                         error=exc,
                     )
-                    raise RuntimeError(f"Tool call retries exhausted after {attempt + 1} attempts.{debug_tail}") from exc
+                    raise RuntimeError(
+                        f"Tool call retries exhausted after {attempt + 1} attempts.{debug_tail}"
+                    ) from exc
 
                 # Provide the exact validation error so the model can fix its tool arguments.
                 validation_error = preview(str(exc), max_len=4000)
@@ -2106,12 +2530,17 @@ class EugeneCore:
         return "tool call validation failed" in text or "tool_use_failed" in text
 
     def _extract_missing_tool_name(self, exc: Exception) -> str | None:
-        match = re.search(r"attempted to call tool '([^']+)' which was not in request\.tools", str(exc))
+        match = re.search(
+            r"attempted to call tool '([^']+)' which was not in request\.tools",
+            str(exc),
+        )
         if match:
             return match.group(1)
         return None
 
-    async def _ensure_missing_tool_available(self, missing_tool: str, tools: list[ToolDefinition], selected_names: list[str]) -> bool:
+    async def _ensure_missing_tool_available(
+        self, missing_tool: str, tools: list[ToolDefinition], selected_names: list[str]
+    ) -> bool:
         record = self.services.applets.registry.get(missing_tool)
         if record is None or not record.enabled:
             return False

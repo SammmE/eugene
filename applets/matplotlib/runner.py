@@ -21,10 +21,7 @@ ALLOWED_ROOT_MODULES = {
     "collections",
     "csv",
     "datetime",
-    "decimal",
-    "fractions",
     "io",
-    "itertools",
     "json",
     "math",
     "matplotlib",
@@ -32,24 +29,20 @@ ALLOWED_ROOT_MODULES = {
     "pandas",
     "pathlib",
     "random",
-    "re",
-    "sqlite3",
     "statistics",
-    "textwrap",
 }
 
 
 def main(payload_path: str, result_path: str) -> int:
-    payload = json.loads(Path(payload_path).read_text(encoding="utf-8"))
+    payload = json.loads(Path(payload_path).read_text(encoding="utf-8-sig"))
     workspace_dir = Path(payload["workspace_dir"]).resolve()
     artifact_dir = Path(payload["artifact_dir"]).resolve()
-    data_dir = Path(payload["data_dir"]).resolve()
-    max_output_chars = int(payload.get("max_output_chars", 16000))
+    max_output_chars = int(payload.get("max_output_chars", 12000))
 
     workspace_dir.mkdir(parents=True, exist_ok=True)
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    safe_open = make_safe_open(workspace_dir, data_dir)
+    safe_open = make_safe_open(workspace_dir)
     safe_import = make_safe_import()
     safe_builtins = build_safe_builtins(safe_import, safe_open)
 
@@ -74,6 +67,8 @@ def main(payload_path: str, result_path: str) -> int:
                 artifacts,
                 discover_image_artifacts(workspace_dir=workspace_dir, artifact_dir=artifact_dir),
             )
+            if not artifacts:
+                raise RuntimeError("The generated code did not create a matplotlib figure.")
             result = {
                 "ok": True,
                 "result": summarize_value(execution_value, max_output_chars),
@@ -97,22 +92,20 @@ def main(payload_path: str, result_path: str) -> int:
     return 0
 
 
-def make_safe_open(workspace_dir: Path, data_dir: Path):
+def make_safe_open(workspace_dir: Path):
     original_open = builtins.open
-    writable_roots = (workspace_dir, workspace_dir.parent)
-    readable_roots = (workspace_dir, workspace_dir.parent, data_dir)
 
     def _safe_open(file: str | os.PathLike[str], mode: str = "r", *args: Any, **kwargs: Any):
-        path = resolve_safe_path(Path(file), workspace_dir, readable_roots if "r" in mode and all(flag not in mode for flag in ("w", "a", "x", "+")) else writable_roots)
+        path = resolve_safe_path(Path(file), workspace_dir)
         return original_open(path, mode, *args, **kwargs)
 
     return _safe_open
 
 
-def resolve_safe_path(path: Path, base_dir: Path, allowed_roots: tuple[Path, ...]) -> Path:
-    candidate = (base_dir / path).resolve() if not path.is_absolute() else path.resolve()
-    if not any(str(candidate).startswith(str(root.resolve())) for root in allowed_roots):
-        raise PermissionError(f"Access outside the Python REPL sandbox is not allowed: {candidate}")
+def resolve_safe_path(path: Path, workspace_dir: Path) -> Path:
+    candidate = (workspace_dir / path).resolve() if not path.is_absolute() else path.resolve()
+    if not str(candidate).startswith(str(workspace_dir.resolve())):
+        raise PermissionError(f"Access outside the matplotlib workspace is not allowed: {candidate}")
     return candidate
 
 
@@ -122,7 +115,7 @@ def make_safe_import():
     def _safe_import(name: str, globals_: Any = None, locals_: Any = None, fromlist: Any = (), level: int = 0):
         root_name = name.split(".", 1)[0]
         if root_name not in ALLOWED_ROOT_MODULES:
-            raise ImportError(f"Import '{name}' is not allowed in the Python REPL sandbox.")
+            raise ImportError(f"Import '{name}' is not allowed in the matplotlib sandbox.")
         return original_import(name, globals_, locals_, fromlist, level)
 
     return _safe_import
@@ -134,43 +127,27 @@ def build_safe_builtins(safe_import, safe_open):
         "all",
         "any",
         "bool",
-        "chr",
         "dict",
         "enumerate",
         "Exception",
         "filter",
         "float",
-        "format",
-        "frozenset",
-        "getattr",
-        "hasattr",
-        "hash",
-        "hex",
         "int",
         "isinstance",
-        "issubclass",
-        "iter",
         "len",
         "list",
-        "map",
         "max",
         "min",
-        "next",
-        "object",
-        "ord",
-        "pow",
         "print",
         "range",
         "repr",
         "reversed",
         "round",
         "set",
-        "slice",
         "sorted",
         "str",
         "sum",
         "tuple",
-        "type",
         "ValueError",
         "zip",
     }
@@ -186,12 +163,8 @@ def load_optional_modules(availability: dict[str, bool]) -> dict[str, Any]:
         ("json", "json"),
         ("math", "math"),
         ("statistics", "statistics"),
-        ("pathlib", "pathlib"),
-        ("csv", "csv"),
-        ("sqlite3", "sqlite3"),
-        ("random", "random"),
-        ("re", "re"),
         ("datetime", "datetime"),
+        ("csv", "csv"),
         ("pandas", "pd"),
         ("numpy", "np"),
         ("matplotlib.pyplot", "plt"),
@@ -214,55 +187,20 @@ def execute_code(code: str, globals_dict: dict[str, Any]) -> Any:
 
     if body:
         module = ast.Module(body=body, type_ignores=[])
-        exec(compile(module, "<python_repl>", "exec"), globals_dict, globals_dict)
+        exec(compile(module, "<matplotlib>", "exec"), globals_dict, globals_dict)
 
     if last_expr is not None:
         expression = ast.Expression(last_expr)
-        return eval(compile(expression, "<python_repl>", "eval"), globals_dict, globals_dict)
+        return eval(compile(expression, "<matplotlib>", "eval"), globals_dict, globals_dict)
     return None
 
 
 def summarize_value(value: Any, max_output_chars: int) -> dict[str, Any] | None:
     if value is None:
         return None
-
-    module_name = type(value).__module__
-    type_name = type(value).__name__
-
-    if module_name.startswith("pandas"):
-        return summarize_pandas(value, max_output_chars)
-
-    if isinstance(value, Path):
-        return {"type": "path", "repr": trim_text(str(value), max_output_chars)}
-
-    if isinstance(value, (dict, list, tuple, set)):
-        return {
-            "type": type_name,
-            "repr": trim_text(repr(value), max_output_chars),
-        }
-
     return {
-        "type": f"{module_name}.{type_name}",
+        "type": f"{type(value).__module__}.{type(value).__name__}",
         "repr": trim_text(repr(value), max_output_chars),
-    }
-
-
-def summarize_pandas(value: Any, max_output_chars: int) -> dict[str, Any]:
-    if type(value).__name__ == "DataFrame":
-        preview = value.head(10).to_string(max_rows=10, max_cols=12)
-        return {
-            "type": "pandas.DataFrame",
-            "shape": list(value.shape),
-            "columns": [str(item) for item in list(value.columns[:20])],
-            "repr": trim_text(preview, max_output_chars),
-        }
-
-    preview = value.head(10).to_string()
-    return {
-        "type": "pandas.Series",
-        "shape": [int(value.shape[0])],
-        "name": str(value.name),
-        "repr": trim_text(preview, max_output_chars),
     }
 
 
@@ -276,7 +214,7 @@ def save_open_figures(artifact_dir: Path) -> list[dict[str, str]]:
     for index, fig_number in enumerate(plt.get_fignums(), start=1):
         figure = plt.figure(fig_number)
         target = artifact_dir / f"figure_{index}.png"
-        figure.savefig(target, bbox_inches="tight")
+        figure.savefig(target, bbox_inches="tight", dpi=160)
         artifacts.append({"path": str(target), "media_type": "image/png"})
     if artifacts:
         plt.close("all")
