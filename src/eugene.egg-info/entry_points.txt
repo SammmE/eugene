@@ -1,3 +1,0 @@
-[console_scripts]
-eugene = eugene.__main__:main
-eugene-termagotchi = eugene.termagotchi_client:main
